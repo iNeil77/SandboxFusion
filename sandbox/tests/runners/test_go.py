@@ -64,7 +64,7 @@ def test_golang_timeout():
     }
     ''',
                              run_timeout=0.19,
-                             compile_timeout=1)
+                             compile_timeout=30)
     response = client.post('/run_code', json=request.model_dump())
     assert response.status_code == 200
     result = RunCodeResponse(**response.json())

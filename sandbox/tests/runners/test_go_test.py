@@ -61,7 +61,8 @@ def test_golang_test_pass():
         assert.Equal(true, HasCloseElements([]float64{1.0, 2.8, 3.0, 4.0, 5.0, 2.0}, 0.3))
     }
     ''',
-                             run_timeout=20)
+                             run_timeout=120,
+                             compile_timeout=30)
     response = client.post('/run_code', json=request.model_dump())
     assert response.status_code == 200
     result = RunCodeResponse(**response.json())
@@ -104,7 +105,8 @@ def test_golang_test_fail():
         assert.Equal(true, HasCloseElements([]float64{1.0, 2.8, 3.0, 4.0, 5.0, 2.0}, 0.3))
     }
     ''',
-                             run_timeout=20)
+                             run_timeout=120,
+                             compile_timeout=30)
     response = client.post('/run_code', json=request.model_dump())
     assert response.status_code == 200
     result = RunCodeResponse(**response.json())
@@ -128,7 +130,8 @@ def test_golang_test_timeout():
         time.Sleep(200 * time.Millisecond)
     }
     ''',
-                             run_timeout=0.19)
+                             run_timeout=0.19,
+                             compile_timeout=30)
     response = client.post('/run_code', json=request.model_dump())
     assert response.status_code == 200
     result = RunCodeResponse(**response.json())

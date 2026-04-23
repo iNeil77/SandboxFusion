@@ -42,7 +42,6 @@ from sandbox.runners.base import restore_files, run_command_bare, run_commands
 from sandbox.runners.types import CodeRunArgs, CodeRunResult, CommandRunStatus
 from sandbox.utils.common import ensure_php_tag_in_string, find_conda_root
 from sandbox.utils.execution import get_tmp_dir
-from sandbox.utils.extraction import find_java_public_class_name
 
 logger = structlog.stdlib.get_logger()
 config = RunConfig.get_instance_sync()
@@ -210,6 +209,7 @@ async def run_junit(args: CodeRunArgs) -> CodeRunResult:
         jars = ['.', junit_jar] + deps + [filename for filename in args.files.keys() if filename.endswith('.jar')]
         cpargs = f'{":".join(jars)}'
         if args.code:
+            from sandbox.utils.extraction import find_java_public_class_name
             class_name = find_java_public_class_name(args.code) or 'Main'
             fn = os.path.join(tmp_dir, f'{class_name}.java')
             with open(fn, 'w') as f:
