@@ -37,7 +37,7 @@ import psutil
 import structlog
 
 from sandbox.configs.run_config import RunConfig
-from sandbox.runners.isolation import tmp_cgroup, tmp_netns, tmp_overlayfs
+from sandbox.runners.isolation import CGROUP_VERSION, tmp_cgroup, tmp_netns, tmp_overlayfs
 from sandbox.runners.types import CodeRunArgs, CodeRunResult, CommandRunResult, CommandRunStatus
 from sandbox.utils.execution import get_output_non_blocking, kill_process_tree
 
@@ -179,8 +179,11 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
         async with tmp_overlayfs() as root, tmp_cgroup(mem_limit='4G', cpu_limit=1) as cgroups, tmp_netns(
                 kwargs.get('netns_no_bridge', False)) as netns:
             prefix = []
-            for cg in cgroups:
-                prefix += ['cgexec', '-g', cg]
+            if CGROUP_VERSION == 2:
+                prefix += cgroups
+            else:
+                for cg in cgroups:
+                    prefix += ['cgexec', '-g', cg]
             if not kwargs.get('disable_pid_isolation', False):
                 prefix += ['unshare', '--pid', '--fork', '--mount-proc']
             prefix += ['ip', 'netns', 'exec', netns]
@@ -214,8 +217,11 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
             '--pids-limit', '256',
             '-v', f'{cwd}:{cwd}',
             '-w', cwd,
-            docker_image,
         ]
+        if extra_env:
+            for k, v in extra_env.items():
+                docker_prefix += ['-e', f'{k}={v}']
+        docker_prefix.append(docker_image)
 
         if compile_command is not None:
             compile_res = await run_command_bare(docker_prefix + ['bash', '-c', compile_command],

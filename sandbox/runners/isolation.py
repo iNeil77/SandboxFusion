@@ -34,6 +34,7 @@ removal) when exiting, even on error.
 import asyncio
 import os
 import shutil
+import stat
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -46,6 +47,22 @@ import structlog
 from sandbox.utils.common import cached_context, random_cgroup_name
 
 logger = structlog.stdlib.get_logger()
+
+
+def _detect_cgroup_version() -> int:
+    """Return 1 or 2 depending on which cgroup hierarchy is mounted at /sys/fs/cgroup."""
+    try:
+        result = os.statvfs('/sys/fs/cgroup')
+        with open('/proc/filesystems') as f:
+            fs_types = f.read()
+        if os.path.isfile('/sys/fs/cgroup/cgroup.controllers'):
+            return 2
+    except OSError:
+        pass
+    return 1
+
+
+CGROUP_VERSION = _detect_cgroup_version()
 
 
 async def execute_command(cmd: List[str], raise_nonzero: bool = True):
@@ -125,17 +142,8 @@ async def tmp_overlayfs():
     await asyncio.to_thread(shutil.rmtree, base_dir)
 
 
-async def cleanup_group(cg):
-    """Kill all processes in a cgroup and delete it.
-
-    Reads the task PIDs from the cgroup's ``tasks`` file, sends ``SIGKILL`` to
-    each, waits for them to disappear from ``/proc``, and finally removes the
-    cgroup via ``cgdelete``.
-
-    Args:
-        cg: Cgroup specifier in ``<controller>:<name>`` format (e.g.
-            ``memory:sandbox_mem_abc123``).
-    """
+async def _cleanup_group_v1(cg):
+    """Kill all processes in a cgroup v1 group and delete it."""
     try:
         with open(f'/sys/fs/cgroup/{cg.replace(":", "/")}/tasks', 'r') as f:
             pids = f.read().splitlines()
@@ -152,64 +160,102 @@ async def cleanup_group(cg):
         logger.error(f"Error cleaning up group {cg}: {e}")
 
 
+async def _cleanup_group_v2(cg_path):
+    """Kill all processes in a cgroup v2 group and remove it."""
+    try:
+        procs_file = os.path.join(cg_path, 'cgroup.procs')
+        if os.path.isfile(procs_file):
+            with open(procs_file, 'r') as f:
+                pids = f.read().splitlines()
+            for pid in pids:
+                if pid.strip():
+                    await execute_command(['sudo', 'kill', '-9', pid], False)
+                    for _ in range(50):
+                        if not os.path.exists(f'/proc/{pid}'):
+                            break
+                        await asyncio.sleep(0.1)
+        await execute_command(['sudo', 'rmdir', cg_path], False)
+    except Exception as e:
+        logger.error(f"Error cleaning up cgroup v2 {cg_path}: {e}")
+
+
+def _parse_mem_limit(mem_limit: str) -> int:
+    """Convert a human-readable memory limit like '4G' to bytes."""
+    mem_limit = mem_limit.strip().upper()
+    multipliers = {'K': 1024, 'M': 1024**2, 'G': 1024**3, 'T': 1024**4}
+    if mem_limit[-1] in multipliers:
+        return int(float(mem_limit[:-1]) * multipliers[mem_limit[-1]])
+    return int(mem_limit)
+
+
 @cached_context
 @asynccontextmanager
 async def tmp_cgroup(mem_limit: Optional[str] = None, cpu_limit: Optional[float] = None):
-    """Async context manager (cached) that creates temporary cgroup v1 controllers.
+    """Async context manager that creates temporary cgroup controllers.
 
-    Creates one or both of a memory and a CPU cgroup with the specified limits.
-    Uses ``cgcreate`` / ``cgset`` to configure the groups.  The yielded list
-    contains ``cgexec``-compatible specifiers (e.g. ``memory:sandbox_mem_xxx``)
-    that callers can prepend to commands.
+    Supports both cgroup v1 (``cgcreate``/``cgset``/``cgexec``) and cgroup v2
+    (direct filesystem manipulation under ``/sys/fs/cgroup/``). The version is
+    auto-detected at module load time.
+
+    For v1, yields a list of ``cgexec``-compatible specifiers. For v2, yields a
+    list containing a single shell snippet that moves the current process into
+    the cgroup before executing the target command.
 
     Args:
-        mem_limit: Memory limit string accepted by cgroup v1, e.g. ``'4G'``.
-        cpu_limit: Fraction of one CPU core, e.g. ``0.5`` for half a core or
-            ``1`` for a full core.
+        mem_limit: Memory limit string, e.g. ``'4G'``.
+        cpu_limit: Fraction of one CPU core, e.g. ``1`` for a full core.
 
     Yields:
-        A list of cgroup specifier strings in ``<controller>:<name>`` format.
-
-    Raises:
-        Exception: If both *mem_limit* and *cpu_limit* are ``None`` (no
-            cgroup would be created).
+        A list of cgroup specifier strings (v1) or wrapper-script paths (v2).
     """
-    groups = []
-
     if mem_limit is None and cpu_limit is None:
         raise Exception('every resource is unlimited, no need for cgroup')
 
-    if mem_limit is not None:
-        mem_group_name = f'sandbox_mem_{random_cgroup_name()}'
-        await execute_command(['sudo', 'cgcreate', '-g', f'memory:{mem_group_name}'])
-        await execute_command(['sudo', 'cgset', '-r', f'memory.limit_in_bytes={mem_limit}', mem_group_name])
-        groups.append(f'memory:{mem_group_name}')
+    if CGROUP_VERSION == 2:
+        cg_name = f'sandbox_{random_cgroup_name()}'
+        cg_path = f'/sys/fs/cgroup/{cg_name}'
+        await execute_command(['sudo', 'mkdir', '-p', cg_path])
 
-    if cpu_limit is not None:
-        cpu_group_name = f'sandbox_cpu_{random_cgroup_name()}'
-        await execute_command(['sudo', 'cgcreate', '-g', f'cpu:{cpu_group_name}'])
-        await execute_command(['sudo', 'cgset', '-r', f'cpu.cfs_quota_us={int(100000 * cpu_limit)}', cpu_group_name])
-        await execute_command(['sudo', 'cgset', '-r', f'cpu.cfs_period_us=100000', cpu_group_name])
-        groups.append(f'cpu:{cpu_group_name}')
-    '''
-    cpuset can make program use specifc cpu cores, which will improve performance for memory bound programs.
-    this is not an important feature for now and thus disabled
-    if cpu_list is not None:
-        # NOTE: sandbox/cset_xxx style naming fails the cgset command
-        cset_group_name = f'sandbox_cset_{random_cgroup_name()}'
-        await execute_command(['sudo', 'cgcreate', '-g', f'cpuset:{cset_group_name}'])
-        await execute_command(['sudo', 'cgset', '-r', f'cpuset.cpus={cpu_list}', cset_group_name])
-        await execute_command(['sudo', 'cgset', '-r', f'cpuset.mems={get_memory_nodes()}', cset_group_name])
-        # as this easily conflicts with other host cgroup settings,
-        # we do not prevent other processes from using the same cpu for now
-        # await execute_command(['sudo', 'cgset', '-r', 'cpuset.cpu_exclusive=1', cset_group_name])
-        groups.append(f'cpuset:{cset_group_name}')
-    '''
+        if mem_limit is not None:
+            mem_bytes = str(_parse_mem_limit(mem_limit))
+            await execute_command(['sudo', 'bash', '-c', f'echo {mem_bytes} > {cg_path}/memory.max'])
 
-    yield groups
+        if cpu_limit is not None:
+            quota = int(100000 * cpu_limit)
+            await execute_command(['sudo', 'bash', '-c', f'echo "{quota} 100000" > {cg_path}/cpu.max'])
 
-    for cg in groups:
-        asyncio.create_task(cleanup_group(cg))
+        wrapper = f'/tmp/cg_enter_{cg_name}.sh'
+        with open(wrapper, 'w') as f:
+            f.write(f'#!/bin/bash\necho $$ > {cg_path}/cgroup.procs\nexec "$@"\n')
+        os.chmod(wrapper, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+
+        yield [wrapper]
+
+        asyncio.create_task(_cleanup_group_v2(cg_path))
+        try:
+            os.unlink(wrapper)
+        except OSError:
+            pass
+    else:
+        groups = []
+
+        if mem_limit is not None:
+            mem_group_name = f'sandbox_mem_{random_cgroup_name()}'
+            await execute_command(['sudo', 'cgcreate', '-g', f'memory:{mem_group_name}'])
+            await execute_command(['sudo', 'cgset', '-r', f'memory.limit_in_bytes={mem_limit}', mem_group_name])
+            groups.append(f'memory:{mem_group_name}')
+
+        if cpu_limit is not None:
+            cpu_group_name = f'sandbox_cpu_{random_cgroup_name()}'
+            await execute_command(['sudo', 'cgcreate', '-g', f'cpu:{cpu_group_name}'])
+            await execute_command(['sudo', 'cgset', '-r', f'cpu.cfs_quota_us={int(100000 * cpu_limit)}', cpu_group_name])
+            await execute_command(['sudo', 'cgset', '-r', f'cpu.cfs_period_us=100000', cpu_group_name])
+            groups.append(f'cpu:{cpu_group_name}')
+
+        yield groups
+
+        for cg in groups:
+            asyncio.create_task(_cleanup_group_v1(cg))
 
 
 # Pool of /24 subnets in the 172.16.0.0/12 private range, used by
@@ -300,8 +346,11 @@ async def main():
         init = time.time()
         print(f'init finish: {init - begin}')
         prefix = []
-        for cg in cgroups:
-            prefix += ['cgexec', '-g', cg]
+        if CGROUP_VERSION == 2:
+            prefix += cgroups
+        else:
+            for cg in cgroups:
+                prefix += ['cgexec', '-g', cg]
         chroot_cmd = ['chroot', root]
         # unshare_cmd = ['unshare', '--net', '--pid', '--fork', '--mount-proc']
         unshare_cmd = ['unshare', '--pid', '--fork', '--mount-proc']

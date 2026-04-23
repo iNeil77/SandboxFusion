@@ -1,0 +1,8 @@
+sandbox:
+  isolation: full
+  max_concurrency: 34
+  docker_image: ineil77/sandbox-fusion-server:23042026
+eval:
+  max_runner_concurrency: 3
+common:
+  logging_color: true

@@ -64,7 +64,7 @@ Full isolation runs each code execution inside a disposable Docker container. Th
 
 When a code execution request arrives, the sandbox:
 
-1. **Launches a Docker container** from the configured `docker_image` (default: `sandbox:base`) with these flags:
+1. **Launches a Docker container** from the configured `docker_image` (default: `ineil77/sandbox-fusion-base:23042026`) with these flags:
    - `--rm` -- Container is automatically removed after exit.
    - `--memory` -- Memory limit from the request (or system default).
    - `--cpus 1` -- Limits CPU to 1 core.
@@ -78,7 +78,7 @@ When a code execution request arrives, the sandbox:
 ### Requirements
 
 - **Docker daemon**: Must be installed and running on the host.
-- **`sandbox:base` image**: The Docker image must have all language runtimes pre-installed. Build it with `make build-base-image`.
+- **`ineil77/sandbox-fusion-base:23042026` image**: The Docker image must have all language runtimes pre-installed. Build it with `make build-base-image`.
 - **No nested Docker**: Full isolation does NOT use Docker-in-Docker. The host Docker daemon creates sibling containers.
 
 ### Configuration
@@ -87,10 +87,10 @@ When a code execution request arrives, the sandbox:
 sandbox:
   isolation: full
   max_concurrency: 100
-  docker_image: sandbox:base
+  docker_image: ineil77/sandbox-fusion-base:23042026
 ```
 
-The `docker_image` field specifies which image to use for sandbox containers. It defaults to `sandbox:base`, which is built by `make build-base-image` and includes all 20+ language runtimes.
+The `docker_image` field specifies which image to use for sandbox containers. It defaults to `ineil77/sandbox-fusion-base:23042026`, which is built by `make build-base-image` and includes all 20+ language runtimes.
 
 ---
 
@@ -107,7 +107,7 @@ The `docker_image` field specifies which image to use for sandbox containers. It
 ### Typical deployment patterns
 
 **Docker deployment (recommended):**
-- Build `sandbox:server` which runs the SandboxFusion server inside a Docker container.
+- Build `ineil77/sandbox-fusion-server:23042026` which runs the SandboxFusion server inside a Docker container.
 - The server uses **lite** isolation inside the container (overlayfs + cgroups within the privileged container).
 - The container needs `--privileged` for overlayfs/cgroups.
 - No nested Docker involved.
@@ -119,7 +119,7 @@ The `docker_image` field specifies which image to use for sandbox containers. It
 
 **Full isolation deployment:**
 - The SandboxFusion server runs on the host (or in a container with Docker socket access).
-- Each code execution spawns a separate `sandbox:base` container via the host Docker daemon.
+- Each code execution spawns a separate `ineil77/sandbox-fusion-base:23042026` container via the host Docker daemon.
 - Use when you want maximum isolation and can tolerate higher latency.
 
 ---

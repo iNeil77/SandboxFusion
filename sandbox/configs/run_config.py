@@ -66,11 +66,11 @@ class RunConfig(BaseModel):
             when concurrency is managed externally, e.g. by pytest-xdist).
         docker_image : str
             Docker image used when ``isolation`` is ``"full"``.
-            Defaults to ``"sandbox:base"``.
+            Defaults to ``"ineil77/sandbox-fusion-server:23042026"``.
         """
         isolation: Literal['lite', 'full']
         max_concurrency: int
-        docker_image: str = 'sandbox:base'
+        docker_image: str = 'ineil77/sandbox-fusion-server:23042026'
 
     class EvalConfig(BaseModel):
         """Evaluation runner settings.

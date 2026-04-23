@@ -275,7 +275,7 @@ rustc <filename> -o test
 
 ## Bash
 
-**Version:** Bash 5.0.17
+**Version:** Bash 5.3.9
 
 **Identifier:** `bash`
 
@@ -305,7 +305,7 @@ No compilation step.
 
 ## R
 
-**Version:** R 3.6.3
+**Version:** R 4.5.2
 
 **Identifier:** `R`
 
@@ -320,7 +320,7 @@ No compilation step.
 
 ## Perl
 
-**Version:** Perl 5.30.0
+**Version:** Perl 5.40.1
 
 **Identifier:** `perl`
 
@@ -335,7 +335,7 @@ No compilation step.
 
 ## D
 
-**Version:** DMD 2.109.0
+**Version:** DMD 2.112.0
 
 **Identifier:** `D_ut`
 
@@ -355,7 +355,7 @@ The `-unittest` flag enables D's built-in unit test blocks.
 
 ## Ruby
 
-**Version:** Ruby 2.7.0p0
+**Version:** Ruby 3.3.8
 
 **Identifier:** `ruby`
 
@@ -370,7 +370,7 @@ No compilation step.
 
 ## Julia
 
-**Version:** Julia 1.4.1
+**Version:** Julia 1.11.5
 
 **Identifier:** `julia`
 
@@ -418,7 +418,7 @@ swiftc <filename> -o test.out
 
 ## Racket
 
-**Version:** Racket 7.2
+**Version:** Racket 8.18
 
 **Identifier:** `racket`
 
@@ -448,15 +448,15 @@ No compilation step.
 | Scala | `scala` | 3.8.3 | Yes | `scalac <file>` | `scala <class>` |
 | Verilog | `verilog` | Icarus 13.0 | -- | -- | verilog-eval |
 | Rust | `rust` | 1.95.0 | Yes | `rustc <file> -o test` | `./test` |
-| Bash | `bash` | 5.0.17 | No | -- | `/bin/bash <file>` |
+| Bash | `bash` | 5.3.9 | No | -- | `/bin/bash <file>` |
 | Lua | `lua` | 5.2 | No | -- | `lua <file>` |
-| R | `R` | 3.6.3 | No | -- | `Rscript <file>` |
-| Perl | `perl` | 5.30.0 | No | -- | `perl <file>` |
-| D | `D_ut` | DMD 2.109.0 | Yes | `dmd <file> -unittest -of=test` | `./test` |
-| Ruby | `ruby` | 2.7.0 | No | -- | `ruby <file>` |
-| Julia | `julia` | 1.4.1 | No | -- | `julia <file>` |
+| R | `R` | 4.5.2 | No | -- | `Rscript <file>` |
+| Perl | `perl` | 5.40.1 | No | -- | `perl <file>` |
+| D | `D_ut` | DMD 2.112.0 | Yes | `dmd <file> -unittest -of=test` | `./test` |
+| Ruby | `ruby` | 3.3.8 | No | -- | `ruby <file>` |
+| Julia | `julia` | 1.11.5 | No | -- | `julia <file>` |
 | Kotlin | `kotlin_script` | 2.1.20 | No | -- | `kotlin <file>` |
 | Swift | `swift` | 6.1.2 | Yes | `swiftc <file> -o test.out` | `./test` |
-| Racket | `racket` | 7.2 | No | -- | `racket <file>` |
+| Racket | `racket` | 8.18 | No | -- | `racket <file>` |
 
 \* C# uses `dotnet run` which handles compilation internally.

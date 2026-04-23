@@ -12,7 +12,7 @@ sandbox:
   # from the sandbox's perspective).
   max_concurrency: 0
   # Docker image used when isolation is "full".
-  docker_image: sandbox:base
+  docker_image: ineil77/sandbox-fusion-server:23042026
 
 eval:
   # Maximum number of test cases evaluated in parallel by the runner.

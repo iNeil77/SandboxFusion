@@ -75,8 +75,9 @@ SandboxFusion/
 |---------|---------|---------|
 | `python` | ^3.11 | Required Python version |
 | `fastapi` | ^0.103.1 | HTTP API framework |
-| `uvicorn` | 0.25.0 (with `standard`) | ASGI server |
-| `pydantic` | >=2.4.0,<2.7.0 | Data validation & serialization |
+| `uvicorn` | >=0.32.0 (with `standard`) | ASGI server |
+| `uvloop` | >=0.21.0 | High-performance event loop |
+| `pydantic` | >=2.9.0,<2.10.0 | Data validation & serialization |
 | `psutil` | ^5.9.8 | Process tree management |
 | `aiofiles` | ^23.2.1 | Async file I/O |
 | `tenacity` | ^8.4.2 | Retry logic with exponential backoff |
@@ -88,7 +89,7 @@ SandboxFusion/
 
 ### External Language Runtimes (installed via Dockerfile.base)
 
-Python 3.13, Go 1.25.9, Node.js 24.0.0, GCC 15.2, JDK 25, .NET 10.0, Rust 1.95.0, PHP 8.5, R, Lua 5.2, Ruby, Julia, Scala 3.8.3, Perl, D (DMD), Kotlin 2.1.20, Icarus Verilog, Lean 4.29.0, Racket, Swift 6.1.2
+Python 3.13, Go 1.25.9, Node.js 24.0.0, GCC 15.2, JDK 25, .NET 10.0, Rust 1.95.0, PHP 8.5, Bash 5.3.9, R 4.5.2, Lua 5.2, Ruby 3.3.8, Julia 1.11.5, Scala 3.8.3, Perl 5.40.1, D (DMD 2.112.0), Kotlin 2.1.20, Icarus Verilog 13.0, Lean 4.29.0, Racket 8.18, Swift 6.1.2
 
 ---
 
@@ -151,7 +152,7 @@ Controlled by YAML files selected via `SANDBOX_CONFIG` env var (default: `local`
 Key config sections:
 - `sandbox.isolation`: `lite` | `full`
 - `sandbox.max_concurrency`: Limits simultaneous code executions
-- `sandbox.docker_image`: Docker image for `full` mode (default: `sandbox:base`)
+- `sandbox.docker_image`: Docker image for `full` mode (default: `ineil77/sandbox-fusion-base:23042026`)
 - `eval.max_runner_concurrency`: Limits parallel test case runners (0 = unlimited)
 - `common.logging_color`: Colored structlog output
 
@@ -207,9 +208,9 @@ Server listens on `http://0.0.0.0:8080` with endpoints:
 ### 2. Running via Docker (Production)
 
 ```bash
-make build-base-image                # builds sandbox:base
-make build-server-image              # builds sandbox:server
-docker run -d --rm --privileged -p 8080:8080 sandbox:server
+make build-base-image                # builds ineil77/sandbox-fusion-base:23042026
+make build-server-image              # builds ineil77/sandbox-fusion-server:23042026
+docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:23042026
 ```
 
 ### 3. Using the Python Client SDK

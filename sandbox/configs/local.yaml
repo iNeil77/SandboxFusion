@@ -9,7 +9,7 @@ sandbox:
   # 34 is a reasonable default for modern multi-core dev machines.
   max_concurrency: 34
   # Docker image used when isolation is "full".
-  docker_image: sandbox:base
+  docker_image: ineil77/sandbox-fusion-server:23042026
 
 eval:
   # Maximum number of test cases evaluated in parallel by the runner.
