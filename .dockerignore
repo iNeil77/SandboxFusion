@@ -179,3 +179,15 @@ runtime/lean/.lake/
 
 debug/
 .docs/
+
+# Core dumps from sandboxed processes
+core.*
+
+# Docker build exclusions
+documentation/
+sandbox/tests/
+*.md
+!README.md
+.claude/
+.git/objects/pack/
+*.jsonl

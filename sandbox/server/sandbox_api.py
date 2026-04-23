@@ -52,7 +52,8 @@ class RunCodeRequest(BaseModel):
         run_timeout: Maximum seconds allowed for code execution.
             Defaults to 10.
         memory_limit_MB: Hard memory cap in megabytes for the sandbox
-            process.  A value of ``-1`` (the default) means no limit.
+            process.  A value of ``-1`` (the default) uses the config
+            default (``sandbox.default_memory_limit_mb``, typically 8192 MB).
         code: Source code to execute.
         stdin: Optional string piped to the process's standard input.
         language: Target language or execution mode (must be a key in

@@ -26,3 +26,7 @@ rm -f ${FILENAME}
 # Accept Anaconda Terms of Service (required since Miniconda 26.x)
 /root/miniconda3/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
 /root/miniconda3/bin/conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
+
+# Clean conda package cache to reduce image size
+/root/miniconda3/bin/conda clean -afy
+rm -rf /root/miniconda3/pkgs/*

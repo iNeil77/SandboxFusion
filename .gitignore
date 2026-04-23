@@ -178,3 +178,6 @@ detect_cuda_version.cc
 debug/
 
 runtime/lean/.lake/
+
+# Core dumps from sandboxed processes
+core.*

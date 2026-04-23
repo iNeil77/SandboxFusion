@@ -65,7 +65,7 @@ class CodeRunArgs(BaseModel):
         compile_timeout: Maximum seconds allowed for the compilation step.
         run_timeout: Maximum seconds allowed for the execution step.
         memory_limit_MB: Memory limit in megabytes (``-1`` means use the
-            default, typically 4 GB).
+            config default ``sandbox.default_memory_limit_mb``, typically 8192 MB).
         stdin: Optional string to feed to the program's standard input.
         fetch_files: List of relative file paths whose contents (base64-encoded)
             should be collected from the sandbox after execution and included

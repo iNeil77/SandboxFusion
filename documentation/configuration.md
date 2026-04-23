@@ -33,7 +33,7 @@ The YAML file maps to the `RunConfig` pydantic model defined in `sandbox/configs
 sandbox:
   isolation: lite           # "lite" or "full"
   max_concurrency: 34       # Max simultaneous sandbox instances (0 = unlimited)
-  docker_image: ineil77/sandbox-fusion-base:23042026  # Docker image for "full" isolation mode
+  docker_image: ineil77/sandbox-fusion-base:23042026-2  # Docker image for "full" isolation mode
 
 eval:
   max_runner_concurrency: 3  # Max parallel test case evaluations (0 = unlimited)
@@ -48,7 +48,7 @@ common:
 |-------|------|---------|-------------|
 | `isolation` | `"lite"` or `"full"` | -- (required) | Isolation mode for code execution. See [Isolation Modes](isolation-modes.md). |
 | `max_concurrency` | `int` | -- (required) | Maximum number of sandbox instances that may run in parallel. Set to `0` to disable the internal concurrency limiter (useful when concurrency is managed externally, e.g. by pytest-xdist). |
-| `docker_image` | `string` | `"ineil77/sandbox-fusion-base:23042026"` | Docker image used when `isolation` is `"full"`. Must have all language runtimes installed. |
+| `docker_image` | `string` | `"ineil77/sandbox-fusion-base:23042026-2"` | Docker image used when `isolation` is `"full"`. Must have all language runtimes installed. |
 
 ### eval
 
@@ -70,7 +70,7 @@ common:
 sandbox:
   isolation: lite
   max_concurrency: 34
-  docker_image: ineil77/sandbox-fusion-base:23042026
+  docker_image: ineil77/sandbox-fusion-base:23042026-2
 
 eval:
   max_runner_concurrency: 3
@@ -89,7 +89,7 @@ common:
 sandbox:
   isolation: lite
   max_concurrency: 0
-  docker_image: ineil77/sandbox-fusion-base:23042026
+  docker_image: ineil77/sandbox-fusion-base:23042026-2
 
 eval:
   max_runner_concurrency: 3
@@ -115,7 +115,7 @@ Example for a production deployment using Docker-based full isolation:
 sandbox:
   isolation: full
   max_concurrency: 100
-  docker_image: ineil77/sandbox-fusion-base:23042026
+  docker_image: ineil77/sandbox-fusion-base:23042026-2
 
 eval:
   max_runner_concurrency: 10

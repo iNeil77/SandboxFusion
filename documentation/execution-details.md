@@ -355,7 +355,7 @@ The `-unittest` flag enables D's built-in unit test blocks.
 
 ## Ruby
 
-**Version:** Ruby 3.3.8
+**Version:** Ruby 4.0.0
 
 **Identifier:** `ruby`
 
@@ -418,7 +418,7 @@ swiftc <filename> -o test.out
 
 ## Racket
 
-**Version:** Racket 8.18
+**Version:** Racket 9.1
 
 **Identifier:** `racket`
 
@@ -453,10 +453,10 @@ No compilation step.
 | R | `R` | 4.5.2 | No | -- | `Rscript <file>` |
 | Perl | `perl` | 5.40.1 | No | -- | `perl <file>` |
 | D | `D_ut` | DMD 2.112.0 | Yes | `dmd <file> -unittest -of=test` | `./test` |
-| Ruby | `ruby` | 3.3.8 | No | -- | `ruby <file>` |
+| Ruby | `ruby` | 4.0.0 | No | -- | `ruby <file>` |
 | Julia | `julia` | 1.11.5 | No | -- | `julia <file>` |
 | Kotlin | `kotlin_script` | 2.1.20 | No | -- | `kotlin <file>` |
 | Swift | `swift` | 6.1.2 | Yes | `swiftc <file> -o test.out` | `./test` |
-| Racket | `racket` | 8.18 | No | -- | `racket <file>` |
+| Racket | `racket` | 9.1 | No | -- | `racket <file>` |
 
 \* C# uses `dotnet run` which handles compilation internally.

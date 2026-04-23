@@ -29,12 +29,12 @@ SandboxFusion supports the following languages and execution modes. The `languag
 | R | `R` | R 4.5.2 |
 | Perl | `perl` | Perl 5.40.1 |
 | D | `D_ut` | DMD 2.112.0 (compiled with `-unittest`) |
-| Ruby | `ruby` | Ruby 3.3.8 |
+| Ruby | `ruby` | Ruby 4.0.0 |
 | Julia | `julia` | Julia 1.11.5 |
 | Verilog | `verilog` | Icarus Verilog 13.0 |
 | Lean | `lean` | Lean 4.29.0 (built via `lake build`) |
 | Swift | `swift` | Swift 6.1.2 |
-| Racket | `racket` | Racket 8.18 |
+| Racket | `racket` | Racket 9.1 |
 
 Aliases `js` and `ts` are also accepted for JavaScript and TypeScript respectively.
 
@@ -52,13 +52,13 @@ git clone https://github.com/<your-org>/SandboxFusion.git
 cd SandboxFusion
 
 # Build the base image (installs all language runtimes -- takes ~20 min first time)
-make build-base-image       # produces ineil77/sandbox-fusion-base:23042026
+make build-base-image       # produces ineil77/sandbox-fusion-base:23042026-2
 
-# Build the server image (adds the app + Python deps on top of ineil77/sandbox-fusion-base:23042026)
-make build-server-image     # produces ineil77/sandbox-fusion-server:23042026
+# Build the server image (adds the app + Python deps on top of ineil77/sandbox-fusion-base:23042026-2)
+make build-server-image     # produces ineil77/sandbox-fusion-server:23042026-2
 
 # Run the server
-docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:23042026
+docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:23042026-2
 ```
 
 The `--privileged` flag is required because the sandbox uses overlayfs, cgroups, and network namespaces for lite isolation. If you run with `full` isolation mode, the container needs access to a Docker socket (nested Docker is **not** used; see the Isolation Modes document).
@@ -73,7 +73,7 @@ Manual installation installs all language runtimes directly onto the host OS. Th
 - Linux (required for overlayfs, cgroups, network namespaces)
 - [Miniconda](https://conda.io/projects/conda/en/latest/user-guide/install/index.html) or [Conda](https://docs.conda.io/en/latest/)
 - [Poetry](https://python-poetry.org/docs/#installation)
-- The language runtimes listed in `scripts/Dockerfile.base` (Go 1.25.9, GCC 15.2, JDK 25, Node.js 24.0.0, .NET 10.0, Rust 1.95.0, PHP 8.5, Bash 5.3.9, R 4.5.2, Lua 5.2, Ruby 3.3.8, Julia 1.11.5, Scala 3.8.3, Perl 5.40.1, DMD 2.112.0, Kotlin 2.1.20, Icarus Verilog 13.0, Lean 4.29.0, Racket 8.18, Swift 6.1.2)
+- The language runtimes listed in `scripts/Dockerfile.base` (Go 1.25.9, GCC 15.2, JDK 25, Node.js 24.0.0, .NET 10.0, Rust 1.95.0, PHP 8.5, Bash 5.3.9, R 4.5.2, Lua 5.2, Ruby 4.0.0, Julia 1.11.5, Scala 3.8.3, Perl 5.40.1, DMD 2.112.0, Kotlin 2.1.20, Icarus Verilog 13.0, Lean 4.29.0, Racket 9.1, Swift 6.1.2)
 
 ```bash
 # Create and activate a Python 3.13 environment

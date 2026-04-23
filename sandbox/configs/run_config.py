@@ -66,11 +66,20 @@ class RunConfig(BaseModel):
             when concurrency is managed externally, e.g. by pytest-xdist).
         docker_image : str
             Docker image used when ``isolation`` is ``"full"``.
-            Defaults to ``"ineil77/sandbox-fusion-server:23042026"``.
+            Defaults to ``"ineil77/sandbox-fusion-server:23042026-2"``.
+        default_memory_limit_mb : int
+            Default memory limit in megabytes for each sandbox execution.
+            Overridden by per-request ``memory_limit_MB`` when > 0.
+        default_cpu_limit : float
+            Default CPU core limit for each sandbox execution.
+            In lite mode this sets the CFS quota; in full mode it maps
+            to ``docker run --cpus``.
         """
         isolation: Literal['lite', 'full']
         max_concurrency: int
-        docker_image: str = 'ineil77/sandbox-fusion-server:23042026'
+        docker_image: str = 'ineil77/sandbox-fusion-server:23042026-2'
+        default_memory_limit_mb: int = 8192
+        default_cpu_limit: float = 2
 
     class EvalConfig(BaseModel):
         """Evaluation runner settings.

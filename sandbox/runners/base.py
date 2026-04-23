@@ -145,11 +145,15 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
     Depending on the ``RunConfig.sandbox.isolation`` setting this function
     uses one of two isolation strategies:
 
-    * **lite** -- overlayfs (copy-on-write root filesystem), cgroup v1
-      (4 GB memory, 1 CPU), network namespace, PID namespace via
-      ``unshare --pid``, and ``chroot``.
-    * **full** -- ``docker run --rm`` with ``--memory``, ``--cpus 1``,
+    * **lite** -- overlayfs (copy-on-write root filesystem), cgroup
+      (configurable memory and CPU limits), network namespace, PID
+      namespace via ``unshare --pid``, and ``chroot``.
+    * **full** -- ``docker run --rm`` with ``--memory``, ``--cpus``,
       ``--network none``, ``--pids-limit 256``, and a bind-mount of *cwd*.
+
+    Memory and CPU limits default to ``sandbox.default_memory_limit_mb``
+    (8192 MB) and ``sandbox.default_cpu_limit`` (2 cores) from the YAML
+    config, but can be overridden per-request via ``memory_limit_MB``.
 
     If *compile_command* is provided it is executed first; the run step is
     skipped when compilation fails (non-zero exit or timeout).  After
@@ -176,7 +180,9 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
     run_res = None
 
     if config.sandbox.isolation == 'lite':
-        async with tmp_overlayfs() as root, tmp_cgroup(mem_limit='4G', cpu_limit=1) as cgroups, tmp_netns(
+        mem_limit = f'{args.memory_limit_MB}m' if args.memory_limit_MB > 0 else f'{config.sandbox.default_memory_limit_mb}m'
+        cpu_limit = config.sandbox.default_cpu_limit
+        async with tmp_overlayfs() as root, tmp_cgroup(mem_limit=mem_limit, cpu_limit=cpu_limit) as cgroups, tmp_netns(
                 kwargs.get('netns_no_bridge', False)) as netns:
             prefix = []
             if CGROUP_VERSION == 2:
@@ -208,11 +214,12 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
 
     elif config.sandbox.isolation == 'full':
         docker_image = config.sandbox.docker_image
-        mem_limit = f'{args.memory_limit_MB}m' if args.memory_limit_MB > 0 else '4g'
+        mem_limit = f'{args.memory_limit_MB}m' if args.memory_limit_MB > 0 else f'{config.sandbox.default_memory_limit_mb}m'
+        cpu_limit = str(config.sandbox.default_cpu_limit)
         docker_prefix = [
             'docker', 'run', '--rm', '-i',
             '--memory', mem_limit,
-            '--cpus', '1',
+            '--cpus', cpu_limit,
             '--network', 'none',
             '--pids-limit', '256',
             '-v', f'{cwd}:{cwd}',
