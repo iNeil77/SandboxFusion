@@ -4,10 +4,10 @@ SandboxFusion provides a Python client SDK (`sandbox-fusion`) for programmatic a
 
 ## Installation
 
-Requires Python >= 3.8:
+Requires Python >= 3.8. Install from the local source included in this repository (do **not** `pip install sandbox-fusion` from PyPI — that installs the upstream Bytedance package, not this fork):
 
 ```bash
-pip install sandbox-fusion
+pip install ./scripts/client
 ```
 
 The SDK source is located in `scripts/client/src/sandbox_fusion/`.
