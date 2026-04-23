@@ -14,10 +14,10 @@ install-runtimes:
 	cd runtime/lean && lake build
 
 build-base-image:
-	docker build . -f scripts/Dockerfile.base -t ineil77/sandbox-fusion-base:23042026-3
+	docker build . -f scripts/Dockerfile.base -t ineil77/sandbox-fusion-base:24042026
 
 build-server-image:
-	docker build . -f scripts/Dockerfile.server -t ineil77/sandbox-fusion-server:23042026-3
+	docker build . -f scripts/Dockerfile.server -t ineil77/sandbox-fusion-server:24042026
 
 test:
 	pytest -m "not datalake" -n $(TEST_NP)

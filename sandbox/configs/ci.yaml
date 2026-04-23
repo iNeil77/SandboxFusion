@@ -12,7 +12,7 @@ sandbox:
   # from the sandbox's perspective).
   max_concurrency: 0
   # Docker image used when isolation is "full".
-  docker_image: ineil77/sandbox-fusion-server:23042026-3
+  docker_image: ineil77/sandbox-fusion-server:24042026
   # Default memory limit per sandbox execution (MB). Overridden by per-request memory_limit_MB.
   default_memory_limit_mb: 8192
   # Default CPU core limit per sandbox execution.
