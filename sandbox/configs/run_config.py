@@ -77,7 +77,7 @@ class RunConfig(BaseModel):
         """
         isolation: Literal['lite', 'full']
         max_concurrency: int
-        docker_image: str = 'ineil77/sandbox-fusion-server:23042026-2'
+        docker_image: str = 'ineil77/sandbox-fusion-server:23042026-3'
         default_memory_limit_mb: int = 8192
         default_cpu_limit: float = 2
 

@@ -20,8 +20,10 @@ stdin delivery, and fetching output files after execution.
 
 import base64
 
+import pytest
 from fastapi.testclient import TestClient
 
+from sandbox.configs.run_config import RunConfig
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
 from sandbox.server.server import app
@@ -99,13 +101,29 @@ def test_python_stdin():
 def test_python_fetch_files():
     """Files written during execution should be retrievable via fetch_files as base64."""
     request = RunCodeRequest(language='python',
-                             code='open("a.txt", "w").write("secret"); open("/mnt/b", "w").write("sauce");',
+                             code='open("a.txt", "w").write("secret")',
                              run_timeout=5,
-                             fetch_files=['a.txt', '/mnt/b'])
+                             fetch_files=['a.txt'])
     response = client.post('/run_code', json=request.model_dump())
     assert response.status_code == 200
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Success
     assert result.run_result.status == CommandRunStatus.Finished
     assert base64.b64decode(result.files['a.txt'].encode()).decode() == 'secret'
+
+
+@pytest.mark.skipif(
+    RunConfig.get_instance_sync().sandbox.isolation == 'full',
+    reason='Full mode only bind-mounts the working directory; absolute paths outside cwd are not retrievable')
+def test_python_fetch_files_absolute_path():
+    """Files written to absolute paths should be retrievable in lite mode via overlayfs."""
+    request = RunCodeRequest(language='python',
+                             code='open("/mnt/b", "w").write("sauce")',
+                             run_timeout=5,
+                             fetch_files=['/mnt/b'])
+    response = client.post('/run_code', json=request.model_dump())
+    assert response.status_code == 200
+    result = RunCodeResponse(**response.json())
+    assert result.status == RunStatus.Success
+    assert result.run_result.status == CommandRunStatus.Finished
     assert base64.b64decode(result.files['/mnt/b'].encode()).decode() == 'sauce'

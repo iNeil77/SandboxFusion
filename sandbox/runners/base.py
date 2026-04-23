@@ -149,7 +149,7 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
       (configurable memory and CPU limits), network namespace, PID
       namespace via ``unshare --pid``, and ``chroot``.
     * **full** -- ``docker run --rm`` with ``--memory``, ``--cpus``,
-      ``--network none``, ``--pids-limit 256``, and a bind-mount of *cwd*.
+      ``--network none``, ``--pids-limit 1024``, and a bind-mount of *cwd*.
 
     Memory and CPU limits default to ``sandbox.default_memory_limit_mb``
     (8192 MB) and ``sandbox.default_cpu_limit`` (2 cores) from the YAML
@@ -221,7 +221,7 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
             '--memory', mem_limit,
             '--cpus', cpu_limit,
             '--network', 'none',
-            '--pids-limit', '256',
+            '--pids-limit', '1024',
             '-v', f'{cwd}:{cwd}',
             '-w', cwd,
         ]

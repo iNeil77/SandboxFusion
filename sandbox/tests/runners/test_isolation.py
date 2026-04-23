@@ -29,8 +29,10 @@ executions.
 import asyncio
 import random
 
+import pytest
 from fastapi.testclient import TestClient
 
+from sandbox.configs.run_config import RunConfig
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
 from sandbox.server.server import app
 
@@ -216,11 +218,15 @@ async def test_isolation_network_server_port_conflict():
         assert 'Test Passed' in result.run_result.stdout
 
 
+@pytest.mark.skipif(
+    RunConfig.get_instance_sync().sandbox.isolation == 'full',
+    reason='Full mode uses --network none which blocks all egress traffic')
 def test_isolation_network_external_access():
     """Verify that sandboxed code can make outbound HTTP requests to external hosts.
 
     Runs code that performs a GET request to an external website and checks
     for a 200 status code, confirming that the sandbox allows egress traffic.
+    Only applicable in lite mode where network namespaces provide NAT bridging.
     """
     request = RunCodeRequest(language='python', code=NET_1, run_timeout=20)
     response = client.post('/run_code', json=request.model_dump())

@@ -139,7 +139,7 @@ Python 3.13, Go 1.25.9, Node.js 24.0.0, GCC 15.2, JDK 25, .NET 10.0, Rust 1.95.0
 | Mode | Mechanism | Overhead | Use Case |
 |------|-----------|----------|----------|
 | `lite` | overlayfs (copy-on-write FS) + cgroups v1 (memory/CPU limits) + network namespaces + PID namespace (`unshare`) + `chroot` | ~100ms | Production on Linux, CI, untrusted code |
-| `full` | Docker containers with `--memory`, `--cpus`, `--network none`, `--pids-limit 256` | ~500ms+ | Any platform with Docker, strongest isolation |
+| `full` | Docker containers with `--memory`, `--cpus`, `--network none`, `--pids-limit 1024` | ~500ms+ | Any platform with Docker, strongest isolation |
 
 Both modes require Linux. `lite` requires root (sudo) for overlayfs/cgroups. `full` requires a running Docker daemon and the configured `docker_image`.
 
@@ -152,7 +152,7 @@ Controlled by YAML files selected via `SANDBOX_CONFIG` env var (default: `local`
 Key config sections:
 - `sandbox.isolation`: `lite` | `full`
 - `sandbox.max_concurrency`: Limits simultaneous code executions
-- `sandbox.docker_image`: Docker image for `full` mode (default: `ineil77/sandbox-fusion-base:23042026-2`)
+- `sandbox.docker_image`: Docker image for `full` mode (default: `ineil77/sandbox-fusion-base:23042026-3`)
 - `eval.max_runner_concurrency`: Limits parallel test case runners (0 = unlimited)
 - `common.logging_color`: Colored structlog output
 
@@ -340,7 +340,7 @@ When the server itself runs inside Docker (the production deployment), there are
 │  │  Server Container    │     │  Execution Container (ephemeral) │  │
 │  │  (long-lived)        │     │  docker run --rm -i --memory 8g  │  │
 │  │                      │     │  --cpus 2 --network none         │  │
-│  │  FastAPI + uvicorn   │     │  --pids-limit 256                │  │
+│  │  FastAPI + uvicorn   │     │  --pids-limit 1024                │  │
 │  │  asyncio event loop  │     │  <user code runs here>           │  │
 │  │                      │     └──────────────────────────────────┘  │
 │  │  Spawns execution ───┼──>  ┌──────────────────────────────────┐  │
@@ -368,7 +368,7 @@ Execution containers are **sibling containers** on the host Docker daemon, not n
    - `--memory <limit>` — default 8 GB (from `sandbox.default_memory_limit_mb`), overridden by `memory_limit_MB` from the request
    - `--cpus <limit>` — default 2 cores (from `sandbox.default_cpu_limit`)
    - `--network none` — complete network isolation (no veth, no bridge)
-   - `--pids-limit 256` — prevent fork bombs
+   - `--pids-limit 1024` — prevent fork bombs
    - `-v <workdir>:<workdir>` — bind-mount the temp directory containing the source code
    - `-w <workdir>` — set the working directory inside the container
 
@@ -382,12 +382,12 @@ Execution containers are **sibling containers** on the host Docker daemon, not n
 
 **Final command structure (full mode):**
 ```
-docker run --rm -i --memory 8192m --cpus 2 --network none --pids-limit 256 -v /tmp/xyz:/tmp/xyz -w /tmp/xyz <image> bash -c "<command>"
+docker run --rm -i --memory 8192m --cpus 2 --network none --pids-limit 1024 -v /tmp/xyz:/tmp/xyz -w /tmp/xyz <image> bash -c "<command>"
 ```
 
 **Overhead:** ~500 ms+ per execution (Docker daemon overhead, image layer setup, container creation/teardown).
 
-**Important:** The Docker image used must contain all language toolchains. The default is `ineil77/sandbox-fusion-server:23042026-2`, which extends the base image with all runtimes pre-built.
+**Important:** The Docker image used must contain all language toolchains. The default is `ineil77/sandbox-fusion-server:23042026-3`, which extends the base image with all runtimes pre-built.
 
 ### Server Async Execution Model
 
@@ -491,7 +491,7 @@ results = await asyncio.gather(*[rate_limited_run(r) for r in requests])
 1. All 34 requests enter the event loop simultaneously.
 2. Each constructs a `docker run` command and spawns it via `asyncio.create_subprocess_exec`.
 3. The Docker daemon receives 34 container creation requests. Docker serializes some lifecycle operations internally (container ID allocation, layer setup, cgroup creation within its own goroutine pool).
-4. Docker creates 34 sibling containers on the host daemon (not nested inside the server container), each with `--memory 8192m --cpus 2 --network none --pids-limit 256`.
+4. Docker creates 34 sibling containers on the host daemon (not nested inside the server container), each with `--memory 8192m --cpus 2 --network none --pids-limit 1024`.
 5. Each container runs `bash -c "<compile/run command>"` and exits.
 6. `--rm` triggers automatic cleanup (asynchronous within the daemon — if many containers exit simultaneously, cleanup can queue).
 7. For compiled languages, each request spawns **two sequential containers**: one for compilation, one for execution. This doubles the Docker lifecycle overhead compared to interpreted languages.
@@ -576,7 +576,7 @@ The recommended way to run SandboxFusion in production is via the pre-built serv
 ```bash
 docker run -d --rm --privileged \
     -p 8080:8080 \
-    ineil77/sandbox-fusion-server:23042026-2
+    ineil77/sandbox-fusion-server:23042026-3
 ```
 
 **Fully tuned launch:**
@@ -590,7 +590,7 @@ docker run -d --rm --privileged \
     --tmpfs /tmp:rw,nosuid,nodev,size=64g \
     -e PORT=8080 \
     -e SANDBOX_CONFIG=local \
-    ineil77/sandbox-fusion-server:23042026-2
+    ineil77/sandbox-fusion-server:23042026-3
 ```
 
 ### Resource Sizing Guidelines
@@ -612,7 +612,7 @@ docker run -d --rm --privileged \
     -p 8080:8080 \
     -v /path/to/production.yaml:/root/sandbox/sandbox/configs/production.yaml \
     -e SANDBOX_CONFIG=production \
-    ineil77/sandbox-fusion-server:23042026-2
+    ineil77/sandbox-fusion-server:23042026-3
 ```
 
 **Example `production.yaml` for a 64-core, 256 GB host:**
@@ -622,7 +622,7 @@ sandbox:
   max_concurrency: 30           # Leave cores for server + OS
   default_memory_limit_mb: 8192 # 8 GB per execution
   default_cpu_limit: 2          # 2 cores per execution
-  docker_image: ineil77/sandbox-fusion-server:23042026-2
+  docker_image: ineil77/sandbox-fusion-server:23042026-3
 
 eval:
   max_runner_concurrency: 10   # Parallel test cases per /submit request
@@ -631,19 +631,27 @@ common:
   logging_color: false          # Disable ANSI in production logs
 ```
 
-### Full Mode Setup (Docker-in-Docker)
+### Full Mode Setup (Docker-out-of-Docker)
 
-To use full mode inside a Docker container (Docker-in-Docker), mount the Docker socket:
+To use full mode inside a Docker container, mount the Docker socket **and share `/tmp`**:
 
 ```bash
 docker run -d --rm --privileged \
     -p 8080:8080 \
     -v /var/run/docker.sock:/var/run/docker.sock \
+    -v /tmp:/tmp \
     -e SANDBOX_CONFIG=full_test \
-    ineil77/sandbox-fusion-server:23042026-2
+    ineil77/sandbox-fusion-server:23042026-3
 ```
 
+**Critical:** The `-v /tmp:/tmp` mount is required. The server creates temp directories under `/tmp` and bind-mounts them into sibling execution containers via `-v /tmp/xyz:/tmp/xyz`. Because execution containers are siblings (created on the host Docker daemon, not nested), the `-v` path resolves on the **host**, not inside the server container. Without sharing `/tmp`, execution containers cannot access the source code files and all runs fail with "No such file or directory".
+
 In this configuration, each code execution spawns a sibling container on the host Docker daemon. The `docker_image` in the config must be available on the host. Memory and CPU limits are enforced per-container by Docker, not by the server's cgroup logic.
+
+**Full mode isolation differences from lite mode:**
+- **Network:** Always fully isolated (`--network none`) — no egress traffic is possible. Lite mode provides NAT-bridged network namespaces with outbound connectivity.
+- **File retrieval:** Only files written within the working directory (the bind-mounted temp dir) are retrievable via `fetch_files`. Files written to absolute paths outside the working directory (e.g., `/mnt/b`) are lost when the container exits. In lite mode, overlayfs captures all filesystem writes regardless of path.
+- **PID limit:** `--pids-limit 1024` prevents fork bombs. Some language toolchains (e.g., Lean's LLVM linker) require spawning many threads; the limit was raised from 256 to 1024 to accommodate this.
 
 ### Health Checking and Monitoring
 
@@ -660,7 +668,7 @@ docker run ... --health-cmd "curl -f http://localhost:8080/v1/ping || exit 1" \
 
 The server logs structured JSON via `structlog` to stdout. In production, pipe to a log aggregator:
 ```bash
-docker run ... ineil77/sandbox-fusion-server:23042026-2 2>&1 | jq .
+docker run ... ineil77/sandbox-fusion-server:23042026-3 2>&1 | jq .
 ```
 
 ### Kubernetes Deployment Notes
@@ -697,9 +705,9 @@ Server listens on `http://0.0.0.0:8080` with endpoints:
 ### 2. Running via Docker (Production)
 
 ```bash
-make build-base-image                # builds ineil77/sandbox-fusion-base:23042026-2
-make build-server-image              # builds ineil77/sandbox-fusion-server:23042026-2
-docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:23042026-2
+make build-base-image                # builds ineil77/sandbox-fusion-base:23042026-3
+make build-server-image              # builds ineil77/sandbox-fusion-server:23042026-3
+docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:23042026-3
 ```
 
 ### 3. Using the Python Client SDK
@@ -814,7 +822,8 @@ curl -X POST http://localhost:8080/submit \
 ### 7. Running Tests
 
 ```bash
-make test                        # All tests with 4 parallel workers
+make test                        # All tests with 64 parallel workers (TEST_NP=64)
+make test TEST_NP=8              # Override parallelism (recommended for full mode -- Docker daemon saturates above ~8 concurrent containers)
 make test-case CASE=test_python  # Single test with stdout
 make test-minor                  # Minor language tests only
 ```
