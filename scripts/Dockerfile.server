@@ -6,7 +6,7 @@
 # The resulting image is the deployable sandbox server.
 # =============================================================================
 
-FROM volcengine/sandbox-fusion:base-20250609
+FROM ineil77/sandbox-fusion-base:23042026
 
 # ---------------------------------------------------------------------------
 # Go runtime: copy source and build (caches Go module downloads)
@@ -23,7 +23,7 @@ RUN cd ./runtime/go \
 # (Puppeteer) requires at runtime. (TODO: keep only effective packages.)
 COPY ./runtime/node /root/sandbox/runtime/node
 RUN cd /root/sandbox/runtime/node && npm ci && \
-    apt-get update -y && apt-get install -y fontconfig locales gconf-service libasound2 libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 libexpat1 libfontconfig1 libgcc1 libgconf-2-4 libgdk-pixbuf2.0-0 libglib2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libpangocairo-1.0-0 libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 ca-certificates fonts-liberation libappindicator1 libnss3 lsb-release xdg-utils libgbm-dev
+    apt-get update -y && apt-get install -y fontconfig locales libasound2t64 libatk1.0-0t64 libc6 libcairo2 libcups2t64 libdbus-1-3 libexpat1 libfontconfig1 libgcc-s1 libgdk-pixbuf-xlib-2.0-0 libglib2.0-0t64 libgtk-3-0t64 libnspr4 libpango-1.0-0 libpangocairo-1.0-0 libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 ca-certificates fonts-liberation libnss3 lsb-release xdg-utils libgbm-dev
 
 # ---------------------------------------------------------------------------
 # .NET cache: create and run a temp console project to pre-cache NuGet packages
@@ -45,19 +45,15 @@ COPY ./runtime/python ./runtime/python
 RUN cd ./runtime/python && bash install-python-runtime.sh
 
 # ---------------------------------------------------------------------------
-# Application code: copy full repo, install Poetry deps, build docs site
+# Application code: copy full repo and install Poetry deps
 # ---------------------------------------------------------------------------
 # Disables virtualenv creation so packages install into the system Python.
-# Also builds the documentation static site (docs/) using npm.
 COPY ./ /root/sandbox
 WORKDIR /root/sandbox
 RUN poetry config virtualenvs.create false \
     # TODO: find out why poetry throws error without this
     && touch /root/miniconda3/pyvenv.cfg \
-    && poetry install \
-    && cd ./docs \
-    && npm ci \
-    && npm run build
+    && poetry install
 
 # ---------------------------------------------------------------------------
 # Non-root user and permissions setup

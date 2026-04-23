@@ -13,17 +13,17 @@ SandboxFusion supports the following languages and execution modes. The `languag
 
 | Language | Identifiers | Notes |
 |----------|-------------|-------|
-| Python | `python`, `pytest` | Python 3.10; `pytest` runs the code through the pytest framework |
-| C++ | `cpp` | GCC 9.4.0, C++17 |
-| C# | `csharp` | .NET SDK 8.0 |
-| Go | `go`, `go_test` | Go 1.21.6; `go_test` runs via `go test` |
-| Java | `java`, `junit` | JDK 21; `junit` runs via JUnit 5 |
-| JavaScript | `nodejs` | Node.js 20.11.0 |
+| Python | `python`, `pytest` | Python 3.13; `pytest` runs the code through the pytest framework |
+| C++ | `cpp` | GCC 15.2, C++17 |
+| C# | `csharp` | .NET SDK 10.0 |
+| Go | `go`, `go_test` | Go 1.25.9; `go_test` runs via `go test` |
+| Java | `java`, `junit` | JDK 25; `junit` runs via JUnit 5 |
+| JavaScript | `nodejs` | Node.js 24.0.0 |
 | TypeScript | `typescript`, `jest` | tsx runner; `jest` runs via npm test |
-| Scala | `scala` | Scala 2.11.12 |
-| Kotlin | `kotlin_script` | Kotlin 2.0.0 |
-| PHP | `php` | PHP 7.4.3 |
-| Rust | `rust` | Rust 1.76.0 |
+| Scala | `scala` | Scala 3.8.3 |
+| Kotlin | `kotlin_script` | Kotlin 2.1.20 |
+| PHP | `php` | PHP 8.5 |
+| Rust | `rust` | Rust 1.95.0 |
 | Bash | `bash` | Bash 5.0.17 |
 | Lua | `lua` | Lua 5.2 |
 | R | `R` | R 3.6.3 |
@@ -32,8 +32,8 @@ SandboxFusion supports the following languages and execution modes. The `languag
 | Ruby | `ruby` | Ruby 2.7.0 |
 | Julia | `julia` | Julia 1.4.1 |
 | Verilog | `verilog` | Icarus Verilog 13.0 |
-| Lean | `lean` | Lean 4.10.0 (built via `lake build`) |
-| Swift | `swift` | Swift 5.10.1 |
+| Lean | `lean` | Lean 4.29.0 (built via `lake build`) |
+| Swift | `swift` | Swift 6.1.2 |
 | Racket | `racket` | Racket 7.2 |
 
 Aliases `js` and `ts` are also accepted for JavaScript and TypeScript respectively.
@@ -73,11 +73,11 @@ Manual installation installs all language runtimes directly onto the host OS. Th
 - Linux (required for overlayfs, cgroups, network namespaces)
 - [Miniconda](https://conda.io/projects/conda/en/latest/user-guide/install/index.html) or [Conda](https://docs.conda.io/en/latest/)
 - [Poetry](https://python-poetry.org/docs/#installation)
-- The language runtimes listed in `scripts/Dockerfile.base` (Go 1.23.3, GCC 9, JDK 21, Node.js 20.11.0, .NET 8.0, Rust 1.76.0, PHP 7.4.3, R, Lua 5.2, Ruby, Julia, Scala, Perl, DMD, Kotlin 2.0.0, Icarus Verilog, Lean 4.10.0, Racket, Swift 5.10.1)
+- The language runtimes listed in `scripts/Dockerfile.base` (Go 1.25.9, GCC 15.2, JDK 25, Node.js 24.0.0, .NET 10.0, Rust 1.95.0, PHP 8.5, R, Lua 5.2, Ruby, Julia, Scala 3.8.3, Perl, DMD, Kotlin 2.1.20, Icarus Verilog, Lean 4.29.0, Racket, Swift 6.1.2)
 
 ```bash
-# Create and activate a Python 3.12 environment
-conda create -n sandbox -y python=3.12
+# Create and activate a Python 3.13 environment
+conda create -n sandbox -y python=3.13
 conda activate sandbox
 
 # Install the Python application and its dependencies

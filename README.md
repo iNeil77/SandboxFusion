@@ -66,7 +66,7 @@ docker run -d --rm --privileged -p 8080:8080 sandbox:server
 Prerequisites: [conda](https://conda.io/projects/conda/en/latest/user-guide/install/index.html), [poetry](https://python-poetry.org/docs/#installation), and the language runtimes listed in `scripts/Dockerfile.base` (Go, GCC, JDK, Node.js, .NET, Rust, etc.)
 
 ```bash
-conda create -n sandbox -y python=3.12
+conda create -n sandbox -y python=3.13
 conda activate sandbox
 poetry install
 make install-runtimes       # installs Python, Node, Go, Lean runtime deps

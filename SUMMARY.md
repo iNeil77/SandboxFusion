@@ -47,8 +47,8 @@ SandboxFusion/
 ├── scripts/
 │   ├── client/                   #   Standalone Python SDK package (sandbox_fusion)
 │   │   └── src/sandbox_fusion/   #     Sync & async clients, pydantic models
-│   ├── Dockerfile.base           #   Base image: Ubuntu 20.04 + 20 language runtimes
-│   ├── Dockerfile.server         #   Server image: adds code + deps + docs
+│   ├── Dockerfile.base           #   Base image: Ubuntu 25.10 + 20 language runtimes
+│   ├── Dockerfile.server         #   Server image: adds code + deps
 │   ├── run.sh                    #   Server startup (uvicorn on PORT, default 8080)
 │   ├── install-miniconda.sh      #   Miniconda installer
 │   ├── create_net_namespace.sh   #   Network namespace setup for lite isolation
@@ -88,7 +88,7 @@ SandboxFusion/
 
 ### External Language Runtimes (installed via Dockerfile.base)
 
-Python 3.11, Go 1.23.3, Node.js 20.11.0, GCC 9, JDK 21, .NET 8.0, Rust 1.76.0, PHP 7.4.3, R, Lua 5.2, Ruby, Julia, Scala, Perl, D (DMD), Kotlin 2.0.0, Icarus Verilog, Lean 4.10.0, Racket, Swift 5.10.1
+Python 3.13, Go 1.25.9, Node.js 24.0.0, GCC 15.2, JDK 25, .NET 10.0, Rust 1.95.0, PHP 8.5, R, Lua 5.2, Ruby, Julia, Scala 3.8.3, Perl, D (DMD), Kotlin 2.1.20, Icarus Verilog, Lean 4.29.0, Racket, Swift 6.1.2
 
 ---
 
@@ -189,7 +189,7 @@ class EvalResult(BaseModel):
 ### 1. Running the Server (Development)
 
 ```bash
-conda create -n sandbox -y python=3.12
+conda create -n sandbox -y python=3.13
 conda activate sandbox
 poetry install
 mkdir -p docs/build

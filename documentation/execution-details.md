@@ -16,7 +16,7 @@ This document describes how each supported language is compiled and executed ins
 
 ## Python
 
-**Version:** 3.10
+**Version:** 3.13
 
 **Identifiers:** `python`, `pytest`
 
@@ -35,7 +35,7 @@ The sandbox environment has pre-downloaded two NLTK modules (`punkt` and `stopwo
 
 ## C++
 
-**Version:** GCC 9.4.0 (Ubuntu 9.4.0-1ubuntu1~20.04.2)
+**Version:** GCC 15.2
 
 **Identifier:** `cpp`
 
@@ -55,7 +55,7 @@ The compile command links against OpenSSL (`-lcrypto -lssl`) and pthreads (`-lpt
 
 ## Java
 
-**Version:** JDK 21
+**Version:** JDK 25
 
 **Identifiers:** `java`, `junit`
 
@@ -95,7 +95,7 @@ The JUnit and JavaTuples JARs are stored in `runtime/java/`.
 
 ## Go
 
-**Version:** 1.21.6
+**Version:** 1.25.9
 
 **Identifiers:** `go`, `go_test`
 
@@ -126,7 +126,7 @@ No separate compilation step -- `go test` compiles and runs in one step.
 
 ## JavaScript (Node.js)
 
-**Version:** Node.js 20.11.0
+**Version:** Node.js 24.0.0
 
 **Identifier:** `nodejs`
 
@@ -144,7 +144,7 @@ The Node.js project configuration is in `runtime/node/` (includes package.json, 
 
 ## TypeScript
 
-**Version:** TypeScript 5.3.3 (via tsx)
+**Version:** TypeScript 5.8.3 (via tsx)
 
 **Identifier:** `typescript`
 
@@ -172,7 +172,7 @@ npm run test
 
 ## C#
 
-**Version:** .NET SDK 8.0
+**Version:** .NET SDK 10.0
 
 **Identifier:** `csharp`
 
@@ -192,7 +192,7 @@ dotnet run --project <tmp_dir>
 
 ## Lean
 
-**Version:** Lean 4.10.0
+**Version:** Lean 4.29.0
 
 **Identifier:** `lean`
 
@@ -212,7 +212,7 @@ Lean's proof correctness checking happens at compile time, so there is no separa
 
 ## PHP
 
-**Version:** PHP CLI 7.4.3
+**Version:** PHP CLI 8.5
 
 **Identifier:** `php`
 
@@ -227,7 +227,7 @@ php -f <filename>
 
 ## Scala
 
-**Version:** Scala 2.11.12
+**Version:** Scala 3.8.3
 
 **Identifier:** `scala`
 
@@ -257,7 +257,7 @@ Executed through the `evaluate_functional_correctness` approach from the [verilo
 
 ## Rust
 
-**Version:** Rust 1.76.0
+**Version:** Rust 1.95.0
 
 **Identifier:** `rust`
 
@@ -385,7 +385,7 @@ No compilation step.
 
 ## Kotlin
 
-**Version:** Kotlin 2.0.0
+**Version:** Kotlin 2.1.20
 
 **Identifier:** `kotlin_script`
 
@@ -400,7 +400,7 @@ Kotlin runs in script mode (no separate compilation step).
 
 ## Swift
 
-**Version:** Swift 5.10.1
+**Version:** Swift 6.1.2
 
 **Identifier:** `swift`
 
@@ -435,19 +435,19 @@ No compilation step.
 
 | Language | Identifier(s) | Version | Compiled | Compile Command | Run Command |
 |----------|---------------|---------|----------|-----------------|-------------|
-| Python | `python`, `pytest` | 3.10 | No | -- | `python <file>` / `pytest <file>` |
-| C++ | `cpp` | GCC 9.4.0 | Yes | `g++ -std=c++17 <file> -o test -lcrypto -lssl -lpthread` | `./test` |
-| Java | `java`, `junit` | JDK 21 | Yes | `javac -cp ... Main.java` | `java -cp ... -ea Main` |
-| Go | `go`, `go_test` | 1.21.6 | Yes / No | `go build -o out <file>` | `./out` / `go test <file>` |
-| JavaScript | `nodejs` | Node.js 20.11.0 | No | -- | `node <file>` |
-| TypeScript | `typescript` | 5.3.3 | No | -- | `tsx <file>` |
+| Python | `python`, `pytest` | 3.13 | No | -- | `python <file>` / `pytest <file>` |
+| C++ | `cpp` | GCC 15.2 | Yes | `g++ -std=c++17 <file> -o test -lcrypto -lssl -lpthread` | `./test` |
+| Java | `java`, `junit` | JDK 25 | Yes | `javac -cp ... Main.java` | `java -cp ... -ea Main` |
+| Go | `go`, `go_test` | 1.25.9 | Yes / No | `go build -o out <file>` | `./out` / `go test <file>` |
+| JavaScript | `nodejs` | Node.js 24.0.0 | No | -- | `node <file>` |
+| TypeScript | `typescript` | 5.8.3 | No | -- | `tsx <file>` |
 | Jest | `jest` | 29.7.0 | No | -- | `npm run test` |
-| C# | `csharp` | .NET 8.0 | No* | -- | `dotnet run --project <dir>` |
-| Lean | `lean` | 4.10.0 | N/A | -- | `lake build` |
-| PHP | `php` | 7.4.3 | No | -- | `php -f <file>` |
-| Scala | `scala` | 2.11.12 | Yes | `scalac <file>` | `scala <class>` |
+| C# | `csharp` | .NET 10.0 | No* | -- | `dotnet run --project <dir>` |
+| Lean | `lean` | 4.29.0 | N/A | -- | `lake build` |
+| PHP | `php` | 8.5 | No | -- | `php -f <file>` |
+| Scala | `scala` | 3.8.3 | Yes | `scalac <file>` | `scala <class>` |
 | Verilog | `verilog` | Icarus 13.0 | -- | -- | verilog-eval |
-| Rust | `rust` | 1.76.0 | Yes | `rustc <file> -o test` | `./test` |
+| Rust | `rust` | 1.95.0 | Yes | `rustc <file> -o test` | `./test` |
 | Bash | `bash` | 5.0.17 | No | -- | `/bin/bash <file>` |
 | Lua | `lua` | 5.2 | No | -- | `lua <file>` |
 | R | `R` | 3.6.3 | No | -- | `Rscript <file>` |
@@ -455,8 +455,8 @@ No compilation step.
 | D | `D_ut` | DMD 2.109.0 | Yes | `dmd <file> -unittest -of=test` | `./test` |
 | Ruby | `ruby` | 2.7.0 | No | -- | `ruby <file>` |
 | Julia | `julia` | 1.4.1 | No | -- | `julia <file>` |
-| Kotlin | `kotlin_script` | 2.0.0 | No | -- | `kotlin <file>` |
-| Swift | `swift` | 5.10.1 | Yes | `swiftc <file> -o test.out` | `./test` |
+| Kotlin | `kotlin_script` | 2.1.20 | No | -- | `kotlin <file>` |
+| Swift | `swift` | 6.1.2 | Yes | `swiftc <file> -o test.out` | `./test` |
 | Racket | `racket` | 7.2 | No | -- | `racket <file>` |
 
 \* C# uses `dotnet run` which handles compilation internally.
