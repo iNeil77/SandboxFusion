@@ -1,25 +1,54 @@
+# =============================================================================
+# Dockerfile.server -- Server image for SandboxFusion
+# =============================================================================
+# Extends the base sandbox image (which provides all language toolchains) with
+# runtime dependencies, the Python application code, and user/permission setup.
+# The resulting image is the deployable sandbox server.
+# =============================================================================
+
 FROM volcengine/sandbox-fusion:base-20250609
 
+# ---------------------------------------------------------------------------
+# Go runtime: copy source and build (caches Go module downloads)
+# ---------------------------------------------------------------------------
 COPY ./runtime/go ./runtime/go
-# download and cache go deps
 RUN cd ./runtime/go \
     && go build
 
+# ---------------------------------------------------------------------------
+# Node.js runtime: install npm dependencies and Puppeteer system libraries
+# ---------------------------------------------------------------------------
+# Copies the Node runtime project, runs `npm ci` for deterministic installs,
+# then installs the system-level shared libraries that headless Chromium
+# (Puppeteer) requires at runtime. (TODO: keep only effective packages.)
 COPY ./runtime/node /root/sandbox/runtime/node
-# also install puppetter chrome requirements (TODO: keep effective packages only)
 RUN cd /root/sandbox/runtime/node && npm ci && \
     apt-get update -y && apt-get install -y fontconfig locales gconf-service libasound2 libatk1.0-0 libc6 libcairo2 libcups2 libdbus-1-3 libexpat1 libfontconfig1 libgcc1 libgconf-2-4 libgdk-pixbuf2.0-0 libglib2.0-0 libgtk-3-0 libnspr4 libpango-1.0-0 libpangocairo-1.0-0 libstdc++6 libx11-6 libx11-xcb1 libxcb1 libxcomposite1 libxcursor1 libxdamage1 libxext6 libxfixes3 libxi6 libxrandr2 libxrender1 libxss1 libxtst6 ca-certificates fonts-liberation libappindicator1 libnss3 lsb-release xdg-utils libgbm-dev
 
-# cache dotnet
+# ---------------------------------------------------------------------------
+# .NET cache: create and run a temp console project to pre-cache NuGet packages
+# ---------------------------------------------------------------------------
+# Running `dotnet new` + `dotnet run` forces the SDK to download and cache its
+# implicit packages so the first real C# compilation doesn't incur the cost.
 RUN dotnet new console -o /tmp/dotnet && dotnet run --project /tmp/dotnet
 
-# cache lean
+# ---------------------------------------------------------------------------
+# Lean runtime: copy lakefile and build to cache Lean dependencies
+# ---------------------------------------------------------------------------
 COPY ./runtime/lean /root/sandbox/runtime/lean
 RUN cd /root/sandbox/runtime/lean && lake build
 
+# ---------------------------------------------------------------------------
+# Python runtime: copy and install via install-python-runtime.sh
+# ---------------------------------------------------------------------------
 COPY ./runtime/python ./runtime/python
 RUN cd ./runtime/python && bash install-python-runtime.sh
 
+# ---------------------------------------------------------------------------
+# Application code: copy full repo, install Poetry deps, build docs site
+# ---------------------------------------------------------------------------
+# Disables virtualenv creation so packages install into the system Python.
+# Also builds the documentation static site (docs/) using npm.
 COPY ./ /root/sandbox
 WORKDIR /root/sandbox
 RUN poetry config virtualenvs.create false \
@@ -30,9 +59,18 @@ RUN poetry config virtualenvs.create false \
     && npm ci \
     && npm run build
 
+# ---------------------------------------------------------------------------
+# Non-root user and permissions setup
+# ---------------------------------------------------------------------------
+# Creates a non-root 'app' user for running sandboxed code, grants read/
+# execute on /root so the app user can access installed toolchains, and
+# makes /mnt world-writable for temporary working directories.
 RUN useradd -m app && echo 'app:app' | chpasswd \
     && chmod og+rx /root \
     && mkdir -p /mnt \
     && chmod og+rwx /mnt
 
+# ---------------------------------------------------------------------------
+# Entrypoint: launch the sandbox server via run.sh
+# ---------------------------------------------------------------------------
 CMD bash /root/sandbox/scripts/run.sh

@@ -1,3 +1,17 @@
+-- ==========================================================================
+-- Main.lean -- Mathlib import manifest for the SandboxFusion Lean 4 runtime.
+--
+-- This file pre-imports a broad set of Mathlib4 modules covering algebra,
+-- analysis, combinatorics, data structures, dynamics, linear algebra, logic,
+-- number theory, order theory, topology, and tactics. The import list is
+-- derived from the requirements of the miniF2F-lean4 benchmark
+-- (https://github.com/yangky11/miniF2F-lean4) so that proofs written against
+-- that benchmark compile without additional import statements.
+--
+-- The `main` function is a trivial sanity check that prints a confirmation
+-- message, verifying that Mathlib was linked successfully.
+-- ==========================================================================
+
 -- required lib for https://github.com/yangky11/miniF2F-lean4
 import Mathlib.Algebra.Algebra.Basic
 import Mathlib.Algebra.Order.Floor

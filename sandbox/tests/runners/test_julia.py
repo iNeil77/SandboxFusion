@@ -11,6 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the Julia sandbox runner.
+
+Covers println output, timeout enforcement, and Julia ``@testset`` /
+``@test`` assertions for both passing and failing cases.
+All tests are marked ``pytest.mark.minor``.
+"""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +30,7 @@ client = TestClient(app)
 
 @pytest.mark.minor
 def test_julia_print():
+    """println should produce expected stdout."""
     request = RunCodeRequest(language='julia', code='''
 println("Hello, World!")
     ''', run_timeout=5)
@@ -37,6 +44,7 @@ println("Hello, World!")
 
 @pytest.mark.minor
 def test_julia_timeout():
+    """Base.sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='julia', code='''
 Base.sleep(5)
     ''', run_timeout=5)
@@ -49,6 +57,7 @@ Base.sleep(5)
 
 @pytest.mark.minor
 def test_julia_assertion_success():
+    """A passing @test assertion should result in Success status."""
     request = RunCodeRequest(language='julia', code='''
 using Test
 @testset begin
@@ -64,6 +73,7 @@ end
 
 @pytest.mark.minor
 def test_julia_assertion_error():
+    """A failing @test assertion should result in Failed status with 'Test Failed' in stdout."""
     request = RunCodeRequest(language='julia', code='''
 using Test
 @testset begin

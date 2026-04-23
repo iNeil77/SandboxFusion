@@ -12,6 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Sandbox code-execution API.
+
+Defines the ``POST /run_code`` endpoint that accepts source code in a
+specified language, dispatches it to the appropriate language runner from
+:mod:`sandbox.runners`, and returns a structured response containing
+compilation and execution results along with an overall status
+(Success, Failed, or SandboxError).
+"""
+
 import os
 import traceback
 from enum import Enum
@@ -35,6 +44,25 @@ logger = structlog.stdlib.get_logger()
 
 
 class RunCodeRequest(BaseModel):
+    """Request body for the ``POST /run_code`` endpoint.
+
+    Attributes:
+        compile_timeout: Maximum seconds allowed for the compilation step
+            (applicable to compiled languages only).  Defaults to 10.
+        run_timeout: Maximum seconds allowed for code execution.
+            Defaults to 10.
+        memory_limit_MB: Hard memory cap in megabytes for the sandbox
+            process.  A value of ``-1`` (the default) means no limit.
+        code: Source code to execute.
+        stdin: Optional string piped to the process's standard input.
+        language: Target language or execution mode (must be a key in
+            :data:`sandbox.runners.CODE_RUNNERS`).
+        files: Mapping of file paths to base64-encoded contents that
+            will be materialised inside the sandbox before execution.
+        fetch_files: List of file paths to read back from the sandbox
+            after execution and return as base64 in the response.
+    """
+
     compile_timeout: float = Field(10, description='compile timeout for compiled languages')
     run_timeout: float = Field(10, description='code run timeout')
     memory_limit_MB: int = Field(-1, description='maximum memory allowed in megabytes')
@@ -46,6 +74,18 @@ class RunCodeRequest(BaseModel):
 
 
 class RunStatus(str, Enum):
+    """High-level outcome of a code-execution request.
+
+    Members:
+        Success: All commands (compile and run) finished with a zero
+            exit code and no infrastructure errors.
+        Failed: The user's code itself failed -- either a non-zero exit
+            code or a time-limit-exceeded condition.
+        SandboxError: An infrastructure or sandbox-level error occurred
+            (e.g. the runner raised an exception or reported an Error
+            status).
+    """
+
     # all command finished successfully
     Success = 'Success'
     # one of the process has non-zero return code
@@ -55,6 +95,21 @@ class RunStatus(str, Enum):
 
 
 class RunCodeResponse(BaseModel):
+    """Response body returned by the ``POST /run_code`` endpoint.
+
+    Attributes:
+        status: Aggregate outcome of the execution request.
+        message: Human-readable detail when ``status`` is not
+            :attr:`RunStatus.Success` (empty string on success).
+        compile_result: Output of the compilation step, if applicable.
+        run_result: Output of the execution step.
+        executor_pod_name: Kubernetes pod name that handled the request
+            (populated from the ``MY_POD_NAME`` environment variable).
+        files: Mapping of requested file paths to their base64-encoded
+            contents, as specified by
+            :attr:`RunCodeRequest.fetch_files`.
+    """
+
     status: RunStatus
     message: str
     compile_result: Optional[CommandRunResult] = None
@@ -64,6 +119,26 @@ class RunCodeResponse(BaseModel):
 
 
 def parse_run_status(result: CodeRunResult) -> Tuple[RunStatus, str]:
+    """Interpret a :class:`CodeRunResult` into a high-level status and message.
+
+    Inspects both the compile and run results (if present) in order and
+    applies the following precedence rules:
+
+    1. If any step has :attr:`CommandRunStatus.Error`, return
+       :attr:`RunStatus.SandboxError` with that step's stderr.
+    2. If any step hit a time-limit exceeded condition, return
+       :attr:`RunStatus.Failed`.
+    3. If any step exited with a non-zero return code, return
+       :attr:`RunStatus.Failed`.
+    4. Otherwise return :attr:`RunStatus.Success`.
+
+    Args:
+        result: The raw result produced by a language runner.
+
+    Returns:
+        A ``(RunStatus, message)`` tuple.  The message is non-empty only
+        for :attr:`RunStatus.SandboxError`.
+    """
     outcomes = []
     retcodes = []
     err_msgs = []
@@ -91,6 +166,21 @@ def parse_run_status(result: CodeRunResult) -> Tuple[RunStatus, str]:
 
 @sandbox_router.post("/run_code", response_model=RunCodeResponse, tags=['sandbox'])
 async def run_code(request: RunCodeRequest):
+    """Execute arbitrary source code inside a sandboxed environment.
+
+    Dispatches the request to the runner registered in
+    :data:`sandbox.runners.CODE_RUNNERS` for the requested language,
+    translates the runner's :class:`CodeRunResult` into a
+    :class:`RunCodeResponse`, and catches any unexpected exceptions as a
+    :attr:`RunStatus.SandboxError`.
+
+    Args:
+        request: Validated request payload.
+
+    Returns:
+        A :class:`RunCodeResponse` containing compilation/execution
+        output and an overall status.
+    """
     resp = RunCodeResponse(status=RunStatus.Success, message='', executor_pod_name=os.environ.get('MY_POD_NAME'))
     try:
         logger.debug(

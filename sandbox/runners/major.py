@@ -11,6 +11,23 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Runner functions for the 15 "major" supported languages.
+
+Each runner follows a common pattern:
+
+1. Create a temporary directory.
+2. Restore any supplementary files from ``args.files``.
+3. Write ``args.code`` to a language-appropriate temp file.
+4. Call :func:`~sandbox.runners.base.run_commands` with the correct compile
+   and/or run commands.
+
+The module also exposes two cached helper functions --
+:func:`get_python_rt_env` and :func:`get_cpp_rt_flags` -- that probe the host
+environment once and cache the results for the lifetime of the process.
+
+``MAJOR_RUNNERS`` maps language identifier strings to their runner coroutines
+and is merged into ``CODE_RUNNERS`` by :mod:`sandbox.runners`.
+"""
 
 import os
 import shutil
@@ -33,6 +50,19 @@ config = RunConfig.get_instance_sync()
 
 @cache
 def get_python_rt_env(env_name: str):
+    """Return a ``PATH`` env dict pointing at the named conda environment's Python.
+
+    Activates the specified conda environment, locates its ``python`` binary,
+    and builds a ``PATH`` string that prepends that directory while filtering
+    out any existing ``sandbox`` environment paths to avoid conflicts.
+
+    Args:
+        env_name: Name of the conda environment (e.g. ``'sandbox-runtime'``).
+
+    Returns:
+        A dict with a single ``'PATH'`` key suitable for passing as
+        *extra_env* to :func:`~sandbox.runners.base.run_command_bare`.
+    """
     r = subprocess.run(f'bash -c "source {find_conda_root()}/bin/activate {env_name} && which python"',
                        capture_output=True,
                        text=True,
@@ -48,6 +78,15 @@ __cpp_rt_flags = None
 
 
 async def get_cpp_rt_flags():
+    """Probe the host compiler for optional linker flags and cache the result.
+
+    Tries each flag in ``[-lcrypto, -lssl, -lpthread]`` by compiling a trivial
+    C++ program.  Flags that produce a successful build are remembered and
+    appended to all subsequent C++ compile commands.
+
+    Returns:
+        A list of flag strings that the host ``g++`` supports.
+    """
     global __cpp_rt_flags
     if __cpp_rt_flags is not None:
         return __cpp_rt_flags
@@ -70,6 +109,7 @@ async def get_cpp_rt_flags():
 
 
 async def run_python(args: CodeRunArgs) -> CodeRunResult:
+    """Run Python code using the ``sandbox-runtime`` conda environment."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.py', delete=False) as f:
@@ -83,6 +123,7 @@ async def run_python(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_pytest(args: CodeRunArgs) -> CodeRunResult:
+    """Run Python test code via ``pytest`` in the ``sandbox-runtime`` conda environment."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.py', delete=False) as f:
@@ -92,6 +133,7 @@ async def run_pytest(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_cpp(args: CodeRunArgs) -> CodeRunResult:
+    """Compile C++ code with ``g++ -std=c++17`` (plus probed flags) and run the binary."""
     flags = await get_cpp_rt_flags()
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
@@ -102,6 +144,7 @@ async def run_cpp(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_csharp(args: CodeRunArgs) -> CodeRunResult:
+    """Create a .NET console project, replace ``Program.cs``, and run via ``dotnet run``."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         create_project_command = f"dotnet new console -o {tmp_dir}"
@@ -114,6 +157,7 @@ async def run_csharp(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_go_test(args: CodeRunArgs) -> CodeRunResult:
+    """Run Go test code via ``go test``, copying runtime support files first."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         source_dir = os.path.abspath(os.path.join(__file__, '../../../runtime/go'))
         for file in os.listdir(source_dir):
@@ -126,6 +170,7 @@ async def run_go_test(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_go(args: CodeRunArgs) -> CodeRunResult:
+    """Compile Go code with ``go build`` and run the resulting binary."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         source_dir = os.path.abspath(os.path.join(__file__, '../../../runtime/go'))
         for file in os.listdir(source_dir):
@@ -138,6 +183,7 @@ async def run_go(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_java(args: CodeRunArgs) -> CodeRunResult:
+    """Compile and run Java code, including ``javatuples`` and any user-supplied JARs on the classpath."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         deps_dir = os.path.abspath(os.path.join(__file__, '../../../runtime/java'))
         shutil.copy2(os.path.join(deps_dir, 'javatuples-1.2.jar'), tmp_dir)
@@ -152,6 +198,7 @@ async def run_java(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_junit(args: CodeRunArgs) -> CodeRunResult:
+    """Compile Java test code and execute it with JUnit 5 console launcher."""
     junit_jar = 'junit-platform-console-standalone-1.8.2.jar'
     deps = ['junit-jupiter-api-5.11.0-javadoc.jar']
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
@@ -173,6 +220,7 @@ async def run_junit(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_nodejs(args: CodeRunArgs) -> CodeRunResult:
+    """Run JavaScript code via ``node``, symlinking the shared ``node_modules``."""
     # Would be costly to copy entire node_modules into a new tmp folder, so we just symlink it
     deps_dir = os.path.abspath(os.path.join(__file__, '../../../runtime/node'))
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
@@ -185,6 +233,7 @@ async def run_nodejs(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_typescript(args: CodeRunArgs) -> CodeRunResult:
+    """Run TypeScript code via ``tsx``, symlinking the shared ``node_modules``."""
     deps_dir = os.path.abspath(os.path.join(__file__, '../../../runtime/node'))
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
@@ -196,6 +245,7 @@ async def run_typescript(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_jest(args: CodeRunArgs) -> CodeRunResult:
+    """Run TypeScript test code via Jest (``npm run test``), symlinking shared Node runtime files."""
     deps_dir = os.path.abspath(os.path.join(__file__, '../../../runtime/node'))
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
@@ -208,6 +258,7 @@ async def run_jest(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_php(args: CodeRunArgs) -> CodeRunResult:
+    """Run PHP code via ``php -f``, ensuring the ``<?php`` tag is present."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.php', delete=False) as f:
@@ -217,6 +268,7 @@ async def run_php(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_rust(args: CodeRunArgs) -> CodeRunResult:
+    """Compile Rust code with ``rustc`` and run the resulting binary."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.rs', delete=False) as f:
@@ -226,6 +278,7 @@ async def run_rust(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_bash(args: CodeRunArgs) -> CodeRunResult:
+    """Run a Bash script via ``/bin/bash``."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.sh', delete=False) as f:
@@ -234,6 +287,8 @@ async def run_bash(args: CodeRunArgs) -> CodeRunResult:
         return await run_commands(None, f'/bin/bash {f.name}', tmp_dir, {}, args)
 
 
+# Mapping of language identifier strings to their async runner coroutines.
+# Includes aliases (e.g. 'js' -> run_nodejs, 'ts' -> run_typescript).
 MAJOR_RUNNERS = {
     'cpp': run_cpp,
     'go': run_go,

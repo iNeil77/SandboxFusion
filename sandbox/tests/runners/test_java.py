@@ -11,6 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the Java sandbox runner.
+
+Covers stdout output, compilation errors, timeout enforcement, assertion
+errors (both ``throw new AssertionError`` and ``assert`` keyword),
+external JAR dependencies (javatuples), and stdin delivery.
+"""
 
 from fastapi.testclient import TestClient
 
@@ -22,6 +28,7 @@ client = TestClient(app)
 
 
 def test_java_print():
+    """System.out.println should compile, run, and produce expected stdout."""
     request = RunCodeRequest(language='java',
                              code='''
     public class Main {
@@ -39,6 +46,7 @@ def test_java_print():
 
 
 def test_java_compile_error():
+    """A typo in System.out should cause a compilation failure with no run_result."""
     request = RunCodeRequest(language='java',
                              code='''
     public class Main {
@@ -57,6 +65,7 @@ def test_java_compile_error():
 
 
 def test_java_timeout():
+    """Thread.sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='java',
                              code='''
     public class Main {
@@ -78,6 +87,7 @@ def test_java_timeout():
 
 
 def test_java_assertion_error():
+    """Throwing AssertionError should produce the error in stderr and a Failed status."""
     request = RunCodeRequest(language='java',
                              code='''
     public class Main {
@@ -95,6 +105,7 @@ def test_java_assertion_error():
 
 
 def test_java_assert():
+    """The Java assert keyword with -ea should fail when the condition is false."""
     request = RunCodeRequest(language='java',
                              code='''
     public class Main {
@@ -111,6 +122,7 @@ def test_java_assert():
 
 
 def test_java_external_jar():
+    """The javatuples external JAR should be on the classpath and usable at runtime."""
     request = RunCodeRequest(language='java',
                              code='''
     import org.javatuples.Pair;
@@ -146,6 +158,7 @@ def test_java_external_jar():
 
 
 def test_java_stdin():
+    """Stdin data should be delivered to the Java program and readable via Scanner."""
     request = RunCodeRequest(language='java',
                              code='''
     import java.util.Scanner;

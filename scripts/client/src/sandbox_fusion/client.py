@@ -12,6 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Synchronous HTTP client for the SandboxFusion server.
+
+Provides functions for sending code-execution and evaluation-submission
+requests to a SandboxFusion endpoint using ``requests``. All network calls
+are wrapped with configurable retry logic (exponential back-off with jitter)
+powered by the ``tenacity`` library.
+"""
+
 import logging
 from typing import Optional
 from functools import wraps
@@ -30,6 +38,12 @@ logger = logging.getLogger(__name__)
 
 
 def set_endpoint(endpoint: str):
+    """Override the global sandbox server endpoint at runtime.
+
+    Args:
+        endpoint: The full base URL of the SandboxFusion server
+                  (e.g. ``"http://my-host:8080"``).
+    """
     config.SANDBOX_ENDPOINT = endpoint
 
 
@@ -48,6 +62,18 @@ def before_retry_sleep(s):
 
 
 def configurable_retry(max_attempts):
+    """Decorator factory that adds retry-with-exponential-jitter to a function.
+
+    Wraps the target function with ``tenacity.retry``. Automatically detects
+    whether the wrapped function is a coroutine and applies the appropriate
+    sync or async wrapper.
+
+    Args:
+        max_attempts: Maximum number of attempts before giving up.
+
+    Returns:
+        A decorator that adds retry behaviour to the wrapped function.
+    """
 
     def decorator(func):
 
@@ -76,6 +102,24 @@ def run_code(request: RunCodeRequest,
              endpoint: str = '',
              max_attempts: int = 5,
              client_timeout: Optional[float] = None) -> RunCodeResponse:
+    """Execute code on the sandbox server.
+
+    Sends a POST request to the ``/run_code`` endpoint. Retries automatically
+    on transient errors and raises if the sandbox itself reports an error.
+
+    Args:
+        request: The code execution request payload.
+        endpoint: Optional override for the server URL. Falls back to the
+                  global ``SANDBOX_ENDPOINT`` when empty.
+        max_attempts: Maximum number of retry attempts (default 5).
+        client_timeout: Optional HTTP timeout in seconds.
+
+    Returns:
+        A :class:`RunCodeResponse` with compilation/run results.
+
+    Raises:
+        Exception: On non-200 HTTP status or a ``SandboxError`` response.
+    """
 
     @configurable_retry(max_attempts)
     def _run_code(request: RunCodeRequest) -> RunCodeResponse:
@@ -93,6 +137,23 @@ def run_code(request: RunCodeRequest,
 
 
 def summary_run_code_result(result: RunCodeResponse, mapping: SummaryMapping) -> str:
+    """Classify a code-execution response into a single summary status string.
+
+    Inspects the compile and run results within *result* and maps the outcome
+    to one of the status strings defined in *mapping* (e.g. Success, Failed,
+    CompileTimeout, RunFailed, etc.).
+
+    Args:
+        result: The response from a ``run_code`` call.
+        mapping: A :class:`SummaryMapping` that defines the string to return
+                 for each possible outcome category.
+
+    Returns:
+        The summary status string corresponding to the outcome.
+
+    Raises:
+        Exception: If the result is in an unexpected or invalid state.
+    """
     if result.compile_result is None and result.run_result is None:
         if result.status == RunStatus.Success:
             return mapping.Success
@@ -122,6 +183,24 @@ def submit(request: SubmitRequest,
            endpoint: str = '',
            max_attempts: int = 5,
            client_timeout: Optional[float] = None) -> EvalResult:
+    """Submit code for evaluation against test cases.
+
+    Sends a POST request to the ``/submit`` endpoint. The server extracts
+    code from the completion, runs it against the provided test cases, and
+    returns an :class:`EvalResult`.
+
+    Args:
+        request: The submission payload including completion and test cases.
+        endpoint: Optional override for the server URL.
+        max_attempts: Maximum number of retry attempts (default 5).
+        client_timeout: Optional HTTP timeout in seconds.
+
+    Returns:
+        An :class:`EvalResult` indicating whether the submission was accepted.
+
+    Raises:
+        Exception: On non-200 HTTP status.
+    """
 
     @configurable_retry(max_attempts)
     def _submit(request: SubmitRequest) -> EvalResult:
@@ -140,6 +219,23 @@ def submit_safe(request: SubmitRequest,
                 endpoint: str = '',
                 max_attempts: int = 5,
                 client_timeout: Optional[float] = None) -> EvalResult:
+    """Submit code for evaluation, returning a rejected result on failure.
+
+    Identical to :func:`submit` but catches all exceptions and returns a
+    synthetic rejected :class:`EvalResult` instead of propagating them.
+    Useful in batch pipelines where one failing request should not abort
+    the entire run.
+
+    Args:
+        request: The submission payload including completion and test cases.
+        endpoint: Optional override for the server URL.
+        max_attempts: Maximum number of retry attempts (default 5).
+        client_timeout: Optional HTTP timeout in seconds.
+
+    Returns:
+        An :class:`EvalResult`. On error, ``accepted`` is ``False`` and
+        ``tests`` is empty.
+    """
     try:
         return submit(request, endpoint, max_attempts, client_timeout)
     except Exception:

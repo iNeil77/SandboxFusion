@@ -11,6 +11,20 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Tests for network isolation and namespace separation in the sandbox.
+
+Verifies that sandboxed code can:
+
+* Start an HTTP server on 127.0.0.1 or localhost and reach it from the
+  same sandbox (SERVER_1 / SERVER_2 templates).
+* Run two servers on the **same** port concurrently without conflicts,
+  proving that each sandbox gets its own network namespace.
+* Make outbound HTTP requests to external hosts (NET_1 template).
+
+These tests are critical for confirming that the sandbox network
+isolation layer works correctly and does not leak between concurrent
+executions.
+"""
 
 import asyncio
 import random
@@ -144,6 +158,12 @@ test_network_access()
 
 
 def test_isolation_network_server_127():
+    """Verify that a Python HTTP server bound to 127.0.0.1 is reachable within the sandbox.
+
+    Starts a simple HTTP server on a random high port using the 127.0.0.1
+    address, then issues a GET request from the same process.  Confirms
+    that the loopback interface works inside the isolated environment.
+    """
     request = RunCodeRequest(language='python',
                              code=SERVER_1.format(port=random.randint(30000, 60000), wait_time=1),
                              run_timeout=5)
@@ -156,6 +176,11 @@ def test_isolation_network_server_127():
 
 
 def test_isolation_network_server_localhost():
+    """Verify that a Python HTTP server bound to localhost is reachable within the sandbox.
+
+    Same as ``test_isolation_network_server_127`` but uses the ``localhost``
+    hostname to confirm DNS / hosts resolution works inside the namespace.
+    """
     request = RunCodeRequest(language='python',
                              code=SERVER_2.format(port=random.randint(30000, 60000), wait_time=1),
                              run_timeout=5)
@@ -168,6 +193,13 @@ def test_isolation_network_server_localhost():
 
 
 async def test_isolation_network_server_port_conflict():
+    """Verify that two concurrent servers on the same port do not conflict.
+
+    Launches two sandbox executions in parallel, each starting an HTTP server
+    on the **same** random port.  Because each run operates in a separate
+    network namespace, both must succeed without ``Address already in use``
+    errors, proving proper namespace isolation.
+    """
     request = RunCodeRequest(language='python',
                              code=SERVER_1.format(port=random.randint(30000, 60000), wait_time=2),
                              run_timeout=6)
@@ -185,6 +217,11 @@ async def test_isolation_network_server_port_conflict():
 
 
 def test_isolation_network_external_access():
+    """Verify that sandboxed code can make outbound HTTP requests to external hosts.
+
+    Runs code that performs a GET request to an external website and checks
+    for a 200 status code, confirming that the sandbox allows egress traffic.
+    """
     request = RunCodeRequest(language='python', code=NET_1, run_timeout=20)
     response = client.post('/run_code', json=request.model_dump())
     assert response.status_code == 200

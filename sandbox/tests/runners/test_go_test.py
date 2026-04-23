@@ -11,6 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the Go test (go_test) sandbox runner.
+
+Covers passing tests, failing tests (with testify assertions), and
+timeout enforcement when running ``go test`` style code.
+"""
 
 from fastapi.testclient import TestClient
 
@@ -22,6 +27,7 @@ client = TestClient(app)
 
 
 def test_golang_test_pass():
+    """A correct HasCloseElements implementation should pass all testify assertions."""
     request = RunCodeRequest(language='go_test',
                              code='''
     package main
@@ -64,6 +70,7 @@ def test_golang_test_pass():
 
 
 def test_golang_test_fail():
+    """An incorrect implementation (inverted logic) should fail with 'Not equal' in stdout."""
     request = RunCodeRequest(language='go_test',
                              code='''
     package main
@@ -107,6 +114,7 @@ def test_golang_test_fail():
 
 
 def test_golang_test_timeout():
+    """A test that sleeps longer than run_timeout should be killed as TimeLimitExceeded."""
     request = RunCodeRequest(language='go_test',
                              code='''
     package main

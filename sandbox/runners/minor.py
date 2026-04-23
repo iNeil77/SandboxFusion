@@ -11,6 +11,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Runner functions for the 12 "minor" supported languages.
+
+Each runner follows the same pattern as the major runners: create a temp
+directory, restore supplementary files, write source code, and delegate to
+:func:`~sandbox.runners.base.run_commands`.  Languages that require compilation
+(D, Scala, Verilog, Swift) include a compile command; interpreted languages
+pass ``None``.
+
+``MINOR_RUNNERS`` maps language identifier strings to their runner coroutines
+and is merged into ``CODE_RUNNERS`` by :mod:`sandbox.runners`.
+"""
 
 import os
 import re
@@ -23,6 +34,15 @@ from sandbox.utils.execution import get_tmp_dir
 
 
 def find_scala_classname(code) -> Optional[str]:
+    """Extract the Scala ``object`` name from source code using a regex.
+
+    Args:
+        code: Scala source code string.
+
+    Returns:
+        The name of the first ``object`` declaration found, or ``None`` if
+        no match is found.
+    """
     pat = r"object\s+(\w+)(\s*)|(\s+extends\s+\w+\s*){"
     m = re.findall(pat, code, re.DOTALL | re.MULTILINE)
     name = m[0][0] if m else None
@@ -30,6 +50,7 @@ def find_scala_classname(code) -> Optional[str]:
 
 
 async def run_lua(args: CodeRunArgs) -> CodeRunResult:
+    """Run Lua code via the ``lua`` interpreter."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.lua', delete=False) as f:
@@ -39,6 +60,7 @@ async def run_lua(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_r(args: CodeRunArgs) -> CodeRunResult:
+    """Run R code via ``Rscript``."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.R', delete=False) as f:
@@ -48,6 +70,7 @@ async def run_r(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_perl(args: CodeRunArgs) -> CodeRunResult:
+    """Run Perl code via the ``perl`` interpreter."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.pl', delete=False) as f:
@@ -57,6 +80,7 @@ async def run_perl(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_d_ut(args: CodeRunArgs) -> CodeRunResult:
+    """Compile D code with ``dmd -unittest`` and run the resulting test binary."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.d', delete=False) as f:
@@ -66,6 +90,7 @@ async def run_d_ut(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_ruby(args: CodeRunArgs) -> CodeRunResult:
+    """Run Ruby code via the ``ruby`` interpreter."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.rb', delete=False) as f:
@@ -75,6 +100,11 @@ async def run_ruby(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_scala(args: CodeRunArgs) -> CodeRunResult:
+    """Compile Scala code with ``scalac`` and run the detected object.
+
+    Returns an error result immediately if no ``object`` name can be extracted
+    from the source code.
+    """
     classname = find_scala_classname(args.code)
     if not classname:
         result = CommandRunResult(status=CommandRunStatus.Error, return_code=1, stderr='Object name not found.')
@@ -89,6 +119,7 @@ async def run_scala(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_julia(args: CodeRunArgs) -> CodeRunResult:
+    """Run Julia code via the ``julia`` interpreter."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.jl', delete=False) as f:
@@ -98,6 +129,7 @@ async def run_julia(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_kotlin_script(args: CodeRunArgs) -> CodeRunResult:
+    """Run Kotlin script code via the ``kotlin`` command."""
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.kts', delete=False) as f:
@@ -107,6 +139,7 @@ async def run_kotlin_script(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_verilog(args: CodeRunArgs) -> CodeRunResult:
+    """Compile SystemVerilog code with ``iverilog`` (IEEE 1800-2012) and simulate with ``vvp``."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.sv', delete=False) as f:
             f.write(args.code)
@@ -117,6 +150,12 @@ async def run_verilog(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_lean(args: CodeRunArgs) -> CodeRunResult:
+    """Build Lean 4 code via ``lake build``, symlinking shared Lake project files.
+
+    PID isolation is disabled because ``lake`` spawns sub-processes that need
+    to share the PID namespace.  The build step itself verifies that all
+    theorems are proven; there is no separate execution step.
+    """
     deps_dir = os.path.abspath(os.path.join(__file__, '../../../runtime/lean'))
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
@@ -133,6 +172,7 @@ async def run_lean(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_swift(args: CodeRunArgs) -> CodeRunResult:
+    """Compile Swift code with ``swiftc`` and run the resulting binary."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.swift', delete=False) as f:
@@ -141,6 +181,7 @@ async def run_swift(args: CodeRunArgs) -> CodeRunResult:
 
 
 async def run_racket(args: CodeRunArgs) -> CodeRunResult:
+    """Run Racket code via the ``racket`` interpreter."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.rkt', delete=False) as f:
@@ -149,6 +190,7 @@ async def run_racket(args: CodeRunArgs) -> CodeRunResult:
         return await run_commands(None, f'racket {f.name}', tmp_dir, {}, args)
 
 
+# Mapping of language identifier strings to their async runner coroutines.
 MINOR_RUNNERS = {
     'lua': run_lua,
     'R': run_r,

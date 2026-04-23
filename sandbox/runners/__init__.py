@@ -11,6 +11,15 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Entry point for all language runners in the sandbox.
+
+This module aggregates the ``MAJOR_RUNNERS`` and ``MINOR_RUNNERS`` dictionaries
+into a single ``CODE_RUNNERS`` mapping that maps language identifier strings to
+their corresponding async runner functions.  It also re-exports the core type
+definitions (``CodeRunArgs``, ``CodeRunResult``, ``CommandRunResult``,
+``CommandRunStatus``, and ``Language``) so that consumers can import everything
+they need from ``sandbox.runners`` directly.
+"""
 
 from sandbox.runners.major import MAJOR_RUNNERS
 from sandbox.runners.minor import MINOR_RUNNERS

@@ -11,6 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the Swift sandbox runner.
+
+Covers print output, timeout enforcement, assert() for both passing and
+failing cases, and compilation errors.
+"""
 
 from fastapi.testclient import TestClient
 
@@ -22,6 +27,7 @@ client = TestClient(app)
 
 
 def test_swift_print():
+    """Swift print should compile, run, and produce expected stdout."""
     request = RunCodeRequest(language='swift',
                              code='''
 var myString = "Hello, World!"
@@ -38,6 +44,7 @@ print(myString)
 
 
 def test_swift_timeout():
+    """DispatchQueue delay exceeding the run_timeout must be killed as TimeLimitExceeded."""
     request = RunCodeRequest(language='swift',
                              code='''
 import Foundation
@@ -61,6 +68,7 @@ RunLoop.main.run()
 
 
 def test_swift_assertion_success():
+    """Passing Swift assert() calls with correct strlen results should succeed."""
     request = RunCodeRequest(language='swift',
                              code='''
 import Foundation
@@ -98,6 +106,7 @@ assert(strlen(string: "asdasnakj") == 9)
 
 
 def test_swift_assertion_error():
+    """A failing Swift assert() (wrong expected length) should result in Failed status."""
     request = RunCodeRequest(language='swift',
                              code='''
 import Foundation
@@ -133,6 +142,7 @@ assert(strlen(string: "") == 1)
 
 
 def test_swift_compile_error():
+    """A missing closing parenthesis should fail compilation with a non-zero return code."""
     request = RunCodeRequest(language='swift', code='''
 var myString = "Hello, World!"
 

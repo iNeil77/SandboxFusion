@@ -11,6 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the Ruby sandbox runner.
+
+Covers puts output, timeout enforcement, and Test::Unit assertions for
+both passing and failing cases.
+All tests are marked ``pytest.mark.minor``.
+"""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +30,7 @@ client = TestClient(app)
 
 @pytest.mark.minor
 def test_ruby_print():
+    """Ruby puts should produce expected stdout."""
     request = RunCodeRequest(language='ruby', code='''
 puts "Hello, World!";
 
@@ -38,6 +45,7 @@ puts "Hello, World!";
 
 @pytest.mark.minor
 def test_ruby_timeout():
+    """sleep(5) exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='ruby', code='''
 sleep(5)
     ''', run_timeout=5)
@@ -50,6 +58,7 @@ sleep(5)
 
 @pytest.mark.minor
 def test_ruby_assertion_success():
+    """A passing assert_equal should result in Success status."""
     request = RunCodeRequest(language='ruby',
                              code='''
 require 'test/unit'
@@ -68,6 +77,7 @@ end
 
 @pytest.mark.minor
 def test_ruby_assertion_error():
+    """A failing assert_equal should result in Failed status with 'Failure' in stdout."""
     request = RunCodeRequest(language='ruby',
                              code='''
 require 'test/unit'

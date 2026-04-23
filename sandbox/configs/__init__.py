@@ -11,14 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-'''
-run configs:
-- test
-  - local dev
-  - ci
-- online:
-  - open source gneral
-'''
+"""Configuration package. Exposes RunConfig singleton which loads YAML-based settings.
+
+Available configuration profiles are selected via the ``SANDBOX_CONFIG``
+environment variable (default ``"local"``).  Each profile corresponds to a
+YAML file in this directory (e.g. ``local.yaml``, ``ci.yaml``).
+"""
 
 from sandbox.configs.run_config import RunConfig
 

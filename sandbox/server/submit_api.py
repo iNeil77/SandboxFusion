@@ -12,6 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Evaluation submission API.
+
+Defines the ``POST /submit`` endpoint that accepts a code completion,
+extracts executable code from it using configurable extraction logic,
+runs the code against a set of stdin/stdout test cases in parallel, and
+returns an :class:`~sandbox.datasets.types.EvalResult` indicating
+whether all tests passed.
+"""
+
 from fastapi import APIRouter, HTTPException
 
 from sandbox.datasets.types import EvalResult, SubmitRequest
@@ -23,6 +32,32 @@ submit_router = APIRouter()
 
 @submit_router.post("/submit", description='Submit code for evaluation against stdin/stdout test cases', tags=['eval'])
 async def submit(request: SubmitRequest) -> EvalResult:
+    """Evaluate a code completion against stdin/stdout test cases.
+
+    Processing steps:
+
+    1. Validate that ``request.config.language`` is set (raises 400 if
+       missing).
+    2. Extract executable code from the raw completion string using
+       :func:`~sandbox.utils.extraction.default_extract_helper`, which
+       applies language-specific heuristics and any custom extraction
+       logic specified in the config.
+    3. Run the extracted code against every test case in parallel via
+       :func:`~sandbox.utils.testing.check_stdio_test_cases_parallel`.
+    4. Return an :class:`~sandbox.datasets.types.EvalResult` whose
+       ``accepted`` flag is ``True`` only when *all* test cases pass.
+
+    Args:
+        request: Validated submission payload containing the completion
+            text, test cases, and execution configuration.
+
+    Returns:
+        An :class:`~sandbox.datasets.types.EvalResult` with the
+        extracted code, per-test outcomes, and overall acceptance.
+
+    Raises:
+        HTTPException: ``400`` if ``config.language`` is not provided.
+    """
     if not request.config.language:
         raise HTTPException(status_code=400, detail='config.language is required')
 

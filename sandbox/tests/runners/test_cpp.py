@@ -11,6 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the C++ sandbox runner.
+
+Covers stdout output, timeout enforcement, assertion errors, compilation
+errors, stdin delivery, and multi-threaded (pthread) execution.
+"""
 
 from fastapi.testclient import TestClient
 
@@ -22,6 +27,7 @@ client = TestClient(app)
 
 
 def test_cpp_print():
+    """A simple cout statement should compile, run, and produce expected stdout."""
     request = RunCodeRequest(language='cpp',
                              code='''
     #include <iostream>
@@ -41,6 +47,7 @@ def test_cpp_print():
 
 
 def test_cpp_timeout():
+    """A sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='cpp',
                              code='''
     #include <iostream>
@@ -62,6 +69,7 @@ def test_cpp_timeout():
 
 
 def test_cpp_assertion_error():
+    """A failing C assert should produce an Assertion message in stderr and a Failed status."""
     request = RunCodeRequest(language='cpp',
                              code='''
     #include <iostream>
@@ -81,6 +89,7 @@ def test_cpp_assertion_error():
 
 
 def test_cpp_compile_error():
+    """Invalid C++ code should fail at compilation with a non-zero return code and no run_result."""
     request = RunCodeRequest(language='cpp',
                              code='''
     int main() {
@@ -98,6 +107,7 @@ def test_cpp_compile_error():
 
 
 def test_cpp_stdin():
+    """Stdin data should be delivered to the compiled program and readable via cin."""
     request = RunCodeRequest(language='cpp',
                              code='''
     #include <iostream>
@@ -120,6 +130,12 @@ def test_cpp_stdin():
 
 
 def test_cpp_pthread():
+    """A multi-threaded C++ program using std::thread should compile and run correctly.
+
+    Exercises a thread-safe queue with both copyable (int) and move-only
+    (unique_ptr) types, verifying that the sandbox environment supports
+    pthreads and C++17 features.
+    """
     code = """
 #include <memory>
 #include <queue>

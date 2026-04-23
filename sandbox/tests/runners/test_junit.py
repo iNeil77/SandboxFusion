@@ -11,6 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the JUnit (Java unit test) sandbox runner.
+
+Covers a passing JUnit 5 test suite and a failing one (incorrect
+implementation), verifying that the runner correctly reports Success or
+Failed status after compilation and test execution.
+"""
 
 from fastapi.testclient import TestClient
 
@@ -22,6 +28,7 @@ client = TestClient(app)
 
 
 def test_junit_pass():
+    """A correct PhoneNumberCreator implementation should pass all JUnit assertions."""
     request = RunCodeRequest(language='junit',
                              code='''
 import org.junit.jupiter.api.Test;
@@ -98,6 +105,7 @@ class PhoneNumberCreatorTest {
 
 
 def test_junit_fail():
+    """An incorrect implementation (wrong index boundaries) should fail the JUnit tests."""
     request = RunCodeRequest(language='junit',
                              code='''
 import org.junit.jupiter.api.Test;

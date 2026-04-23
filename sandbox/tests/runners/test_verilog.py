@@ -11,6 +11,14 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the Verilog sandbox runner.
+
+Covers a complete testbench scenario: a reference module, a stimulus
+generator, and a ``top_module`` (device under test) implementing a
+simple AND gate.  The test verifies that the Verilog code compiles and
+simulates successfully with zero mismatches.
+Test is marked ``pytest.mark.verilog``.
+"""
 
 import base64
 import os
@@ -26,6 +34,7 @@ client = TestClient(app)
 
 
 def get_dir_files():
+    """Load all files from the verilog samples directory as base64-encoded strings."""
     current_dir = os.path.dirname(os.path.abspath(__file__))
     target_dir = os.path.join(current_dir, 'samples', 'verilog')
     file_contents = {}
@@ -43,6 +52,12 @@ def get_dir_files():
 
 @pytest.mark.verilog
 def test_verilog_basic():
+    """Compile and simulate an AND-gate testbench, verifying zero output mismatches.
+
+    The test combines a reference module, a stimulus generator with random
+    inputs, and a student-supplied ``top_module``.  The testbench XORs the
+    reference and DUT outputs to detect mismatches.
+    """
     test_code = """
 `timescale 1 ps/1 ps
 `define OK 12

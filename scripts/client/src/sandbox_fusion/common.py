@@ -1,3 +1,9 @@
+"""Common utility functions for the SandboxFusion client.
+
+Provides thread-pool-based concurrency helpers for running sandbox requests
+in parallel, and a small URL normalization utility.
+"""
+
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Callable, List, Dict, Optional, Iterator
 from functools import partial
@@ -60,4 +66,12 @@ def run_concurrent(func: Callable,
 
 
 def trim_slash(url: str) -> str:
+    """Strip trailing slash(es) from a URL string.
+
+    Args:
+        url: The URL to normalize.
+
+    Returns:
+        The URL with any trailing ``/`` characters removed.
+    """
     return url.rstrip('/')

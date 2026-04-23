@@ -11,6 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the Lua sandbox runner.
+
+Covers print output, timeout enforcement, and LuaUnit assertions for
+both passing and failing cases.
+All tests are marked ``pytest.mark.minor``.
+"""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +30,7 @@ client = TestClient(app)
 
 @pytest.mark.minor
 def test_lua_print():
+    """Lua print should produce expected stdout."""
     request = RunCodeRequest(language='lua', code='''
 print("Hello, World!")
     ''', run_timeout=5)
@@ -37,6 +44,7 @@ print("Hello, World!")
 
 @pytest.mark.minor
 def test_lua_timeout():
+    """os.execute('sleep') exceeding the run_timeout must be killed as TimeLimitExceeded."""
     request = RunCodeRequest(language='lua', code='''
 os.execute("sleep 3")
     ''', run_timeout=1)
@@ -49,6 +57,7 @@ os.execute("sleep 3")
 
 @pytest.mark.minor
 def test_lua_assertion_success():
+    """A passing LuaUnit assertEquals should result in Success status."""
     request = RunCodeRequest(language='lua', code='''
 lu = require('luaunit')
 lu.assertEquals(0, 0)
@@ -62,6 +71,7 @@ lu.assertEquals(0, 0)
 
 @pytest.mark.minor
 def test_lua_assertion_error():
+    """A failing LuaUnit assertEquals should result in Failed status with error in stderr."""
     request = RunCodeRequest(language='lua', code='''
 lu = require('luaunit')
 lu.assertEquals(1, 2)

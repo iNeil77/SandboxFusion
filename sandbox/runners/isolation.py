@@ -11,6 +11,25 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Linux isolation primitives for the *lite* sandbox mode.
+
+This module provides async context managers and helper functions that set up
+and tear down the OS-level isolation layers used when
+``RunConfig.sandbox.isolation == 'lite'``:
+
+* **Filesystem isolation** -- :func:`tmp_overlayfs` creates an overlayfs whose
+  lower layer is the host root (``/``), with a tmpfs-backed upper layer so all
+  writes are ephemeral.
+* **Resource limits** -- :func:`tmp_cgroup` creates cgroup v1 controllers for
+  memory and/or CPU quota.
+* **Network isolation** -- :func:`tmp_netns` creates a dedicated network
+  namespace via helper shell scripts, drawing subnet addresses from a
+  pre-computed pool that is partitioned per ``pytest-xdist`` worker to avoid
+  conflicts during parallel testing.
+
+All context managers perform full cleanup (unmount, cgroup deletion, namespace
+removal) when exiting, even on error.
+"""
 
 import asyncio
 import os
@@ -30,6 +49,13 @@ logger = structlog.stdlib.get_logger()
 
 
 async def execute_command(cmd: List[str], raise_nonzero: bool = True):
+    """Run a command as an async subprocess and optionally raise on failure.
+
+    Args:
+        cmd: Argument list for the command to execute.
+        raise_nonzero: If True (default), raise ``RuntimeError`` when the
+            process exits with a non-zero return code.
+    """
     process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     stdout, stderr = await process.communicate()
 
@@ -38,17 +64,33 @@ async def execute_command(cmd: List[str], raise_nonzero: bool = True):
 
 
 async def mount_tmpfs(mount_point: str):
+    """Mount a tmpfs filesystem at *mount_point* (requires sudo)."""
     mount_cmd = ['sudo', 'mount', '-t', 'tmpfs', 'tmpfs', mount_point]
     await execute_command(mount_cmd)
 
 
 async def unmount_fs(mount_point: str):
+    """Lazily unmount the filesystem at *mount_point* (requires sudo)."""
     mount_cmd = ['sudo', 'umount', '-l', mount_point]
     await execute_command(mount_cmd)
 
 
 @asynccontextmanager
 async def tmp_overlayfs():
+    """Async context manager that creates a temporary overlayfs sandbox.
+
+    The overlay uses the host root (``/``) as its read-only lower layer and a
+    tmpfs-backed upper layer so that all modifications made by sandboxed
+    processes are ephemeral.  Inside the merged directory ``/proc``, ``/sys``,
+    and ``/dev`` are mounted, and ``/etc/hosts`` and ``/etc/resolv.conf`` are
+    copied from the host for basic network resolution.
+
+    Yields:
+        The path to the merged overlay directory suitable for use as a
+        ``chroot`` target.
+
+    On exit, all mounts are torn down and the temporary directory is removed.
+    """
     base_dir = f'/tmp/overlay_{random_cgroup_name()}'
     merged_dir = f'{base_dir}/merged'
     tmpfs_dir = f'{base_dir}/tmpfs'
@@ -84,6 +126,16 @@ async def tmp_overlayfs():
 
 
 async def cleanup_group(cg):
+    """Kill all processes in a cgroup and delete it.
+
+    Reads the task PIDs from the cgroup's ``tasks`` file, sends ``SIGKILL`` to
+    each, waits for them to disappear from ``/proc``, and finally removes the
+    cgroup via ``cgdelete``.
+
+    Args:
+        cg: Cgroup specifier in ``<controller>:<name>`` format (e.g.
+            ``memory:sandbox_mem_abc123``).
+    """
     try:
         with open(f'/sys/fs/cgroup/{cg.replace(":", "/")}/tasks', 'r') as f:
             pids = f.read().splitlines()
@@ -103,10 +155,25 @@ async def cleanup_group(cg):
 @cached_context
 @asynccontextmanager
 async def tmp_cgroup(mem_limit: Optional[str] = None, cpu_limit: Optional[float] = None):
-    '''
-    mem_limit: in bytes, e.g. 4G
-    cpu_limit: e.g. 0.5
-    '''
+    """Async context manager (cached) that creates temporary cgroup v1 controllers.
+
+    Creates one or both of a memory and a CPU cgroup with the specified limits.
+    Uses ``cgcreate`` / ``cgset`` to configure the groups.  The yielded list
+    contains ``cgexec``-compatible specifiers (e.g. ``memory:sandbox_mem_xxx``)
+    that callers can prepend to commands.
+
+    Args:
+        mem_limit: Memory limit string accepted by cgroup v1, e.g. ``'4G'``.
+        cpu_limit: Fraction of one CPU core, e.g. ``0.5`` for half a core or
+            ``1`` for a full core.
+
+    Yields:
+        A list of cgroup specifier strings in ``<controller>:<name>`` format.
+
+    Raises:
+        Exception: If both *mem_limit* and *cpu_limit* are ``None`` (no
+            cgroup would be created).
+    """
     groups = []
 
     if mem_limit is None and cpu_limit is None:
@@ -145,6 +212,10 @@ async def tmp_cgroup(mem_limit: Optional[str] = None, cpu_limit: Optional[float]
         asyncio.create_task(cleanup_group(cg))
 
 
+# Pool of /24 subnets in the 172.16.0.0/12 private range, used by
+# :func:`tmp_netns` to assign unique subnet addresses to each network
+# namespace.  When running under ``pytest-xdist``, the pool is partitioned by
+# worker ID so that parallel workers never allocate overlapping subnets.
 available_subnets = []
 pytest_worker_id = os.environ.get("PYTEST_XDIST_WORKER")
 if pytest_worker_id is not None:
@@ -161,6 +232,12 @@ clean_netns_script = os.path.abspath(os.path.join(os.path.dirname(__file__), '..
 
 # https://www.reddit.com/r/ProgrammerHumor/comments/8mdcde/the_utimate_dhcp_server/
 def get_subnet_ip_rfc_2322():
+    """Pop and return a subnet prefix from the available pool.
+
+    Returns:
+        A subnet prefix string (e.g. ``'172.16.0'``), or ``None`` if the pool
+        is exhausted.
+    """
     if len(available_subnets) == 0:
         logger.warning('all subnet ip used up')
         return None
@@ -168,12 +245,32 @@ def get_subnet_ip_rfc_2322():
 
 
 def return_subnet_ip_rfc_2322(ip):
+    """Return a previously allocated subnet prefix back to the pool.
+
+    Args:
+        ip: Subnet prefix string to return (e.g. ``'172.16.0'``).
+    """
     available_subnets.append(ip)
 
 
 @cached_context
 @asynccontextmanager
 async def tmp_netns(no_bridge: bool = False):
+    """Async context manager (cached) that creates a temporary network namespace.
+
+    A unique subnet is allocated from :data:`available_subnets` and passed to
+    the ``create_net_namespace.sh`` helper script.  On exit the namespace is
+    torn down by ``clean_net_namespace.sh`` and the subnet is returned to the
+    pool.
+
+    Args:
+        no_bridge: If True, the ``--no-bridge`` flag is passed to the creation
+            script, preventing bridge/veth setup (useful when no outbound
+            connectivity is needed).
+
+    Yields:
+        The name of the newly created network namespace.
+    """
     net_ns_name = random_cgroup_name()
     while True:
         subnet_ip = get_subnet_ip_rfc_2322()
@@ -190,6 +287,13 @@ async def tmp_netns(no_bridge: bool = False):
 
 
 async def main():
+    """Demo / manual test entry point for the isolation primitives.
+
+    Sets up an overlayfs, cgroup, and network namespace, then runs the command
+    given via ``sys.argv[1:]`` inside the chroot.  Prints timing for each
+    phase.  Intended for interactive debugging; the call to ``asyncio.run`` at
+    the bottom of the file is commented out by default.
+    """
     begin = time.time()
     print(f'start: {begin}')
     async with tmp_overlayfs() as root, tmp_cgroup(mem_limit='4G', cpu_limit=0.5) as cgroups, tmp_netns() as netns:

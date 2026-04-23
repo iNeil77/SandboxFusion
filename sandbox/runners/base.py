@@ -11,6 +11,19 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Core execution engine for running code in isolated sandboxes.
+
+This module provides the low-level primitives that every language runner relies
+on:
+
+* :func:`run_command_bare` -- execute a single shell command with timeout and
+  process-tree cleanup.
+* :func:`run_commands` -- orchestrate an optional compile step followed by a
+  run step inside either a *lite* (overlayfs + cgroup + netns + chroot) or
+  *full* (Docker container) isolation environment.
+* :func:`restore_files` -- write base64-encoded file payloads into a working
+  directory before execution.
+"""
 
 import asyncio
 import base64
@@ -39,6 +52,28 @@ async def run_command_bare(command: str | List[str],
                            extra_env: Optional[Dict[str, str]] = {},
                            use_exec: bool = False,
                            preexec_fn=None) -> CommandRunResult:
+    """Execute a single command as a subprocess and return its result.
+
+    This is the lowest-level async execution helper.  It creates a subprocess
+    (via ``asyncio.create_subprocess_shell`` or ``asyncio.create_subprocess_exec``
+    depending on *use_exec*), optionally writes *stdin* to the process, enforces
+    *timeout* via ``asyncio.wait_for``, and kills the entire process tree on
+    timeout or completion.
+
+    Args:
+        command: Shell command string, or argument list when *use_exec* is True.
+        timeout: Maximum wall-clock seconds before the process is killed.
+        stdin: Optional string to write to the process's standard input.
+        cwd: Working directory for the subprocess (shell mode only).
+        extra_env: Additional environment variables merged with ``os.environ``.
+        use_exec: If True, use ``create_subprocess_exec`` (argument list);
+            otherwise use ``create_subprocess_shell`` with ``/bin/bash``.
+        preexec_fn: Callable invoked in the child process before exec.
+
+    Returns:
+        A :class:`CommandRunResult` with status, timing, exit code, and
+        captured stdout/stderr.
+    """
     try:
         logger.debug(f'running command {command}')
         if use_exec:
@@ -105,6 +140,37 @@ async def run_command_bare(command: str | List[str],
 
 async def run_commands(compile_command: Optional[str], run_command: str, cwd: str, extra_env: Optional[Dict[str, str]],
                        args: CodeRunArgs, **kwargs) -> CodeRunResult:
+    """Orchestrate compile and run steps inside an isolated sandbox.
+
+    Depending on the ``RunConfig.sandbox.isolation`` setting this function
+    uses one of two isolation strategies:
+
+    * **lite** -- overlayfs (copy-on-write root filesystem), cgroup v1
+      (4 GB memory, 1 CPU), network namespace, PID namespace via
+      ``unshare --pid``, and ``chroot``.
+    * **full** -- ``docker run --rm`` with ``--memory``, ``--cpus 1``,
+      ``--network none``, ``--pids-limit 256``, and a bind-mount of *cwd*.
+
+    If *compile_command* is provided it is executed first; the run step is
+    skipped when compilation fails (non-zero exit or timeout).  After
+    execution, any files listed in ``args.fetch_files`` are read from the
+    sandbox and returned as base64-encoded strings.
+
+    Args:
+        compile_command: Shell command for the compilation step, or ``None``
+            to skip compilation.
+        run_command: Shell command for the execution step.
+        cwd: Working directory inside the sandbox.
+        extra_env: Additional environment variables for the subprocess.
+        args: A :class:`CodeRunArgs` instance carrying timeouts, stdin, files,
+            and the list of files to fetch after execution.
+        **kwargs: Forwarded to isolation helpers.  Notable keys include
+            ``netns_no_bridge`` (bool) and ``disable_pid_isolation`` (bool).
+
+    Returns:
+        A :class:`CodeRunResult` containing the compile result (if any), the
+        run result (if any), and a dict of fetched files.
+    """
     files = {}
     compile_res = None
     run_res = None
@@ -169,6 +235,17 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
 
 
 def restore_files(dir: str, files: Dict[str, Optional[str]]):
+    """Write base64-encoded file payloads into a directory.
+
+    Each entry in *files* maps a relative path to its base64-encoded content.
+    Intermediate directories are created as needed.  Entries whose content is
+    not a string or whose filename contains ``IGNORE_THIS_FILE`` are silently
+    skipped.
+
+    Args:
+        dir: Target directory to write files into.
+        files: Mapping of ``{relative_path: base64_content}``.
+    """
     for filename, content in files.items():
         if not isinstance(content, str):
             continue

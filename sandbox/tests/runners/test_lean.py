@@ -11,6 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the Lean 4 (with Mathlib) sandbox runner.
+
+Covers a valid Lean proof, a proof using ``sorry`` (which succeeds with
+a warning), and a proof with a missing tactic step that causes a type
+error.  All tests are marked ``pytest.mark.lean``.
+"""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +30,11 @@ client = TestClient(app)
 
 @pytest.mark.lean
 def test_lean_pass():
+    """A valid Lean proof and a sorry-based proof should both succeed.
+
+    The first proof is complete (using linarith); the second uses ``sorry``
+    and should succeed but emit a 'declaration uses sorry' warning in stdout.
+    """
     request = RunCodeRequest(language='lean',
                              code='''
 import Mathlib.Data.Real.Basic
@@ -70,6 +81,7 @@ theorem amc12_2000_p5
 
 @pytest.mark.lean
 def test_lean_error():
+    """A Lean proof with a missing tactic step should fail type-checking."""
     request = RunCodeRequest(language='lean',
                              code='''
 import Mathlib.Data.Real.Basic

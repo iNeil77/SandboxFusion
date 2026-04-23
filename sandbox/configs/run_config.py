@@ -12,6 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Runtime configuration loader for the sandbox service.
+
+This module defines :class:`RunConfig`, a pydantic model that is populated
+from a YAML configuration file at startup.  The YAML file is chosen by the
+``SANDBOX_CONFIG`` environment variable (default ``"local"``), and the
+corresponding ``<name>.yaml`` is resolved relative to this module's directory.
+
+``RunConfig`` follows the **singleton pattern**: call
+:meth:`RunConfig.get_instance_sync` to obtain the shared instance.  Direct
+construction via ``RunConfig()`` is supported but discouraged outside tests.
+"""
+
 import os
 from typing import Literal, Optional
 
@@ -23,20 +35,62 @@ logger = structlog.stdlib.get_logger()
 
 
 class RunConfig(BaseModel):
+    """Top-level runtime configuration singleton.
+
+    Sections
+    --------
+    sandbox : SandboxConfig
+        Controls the code-execution sandbox (isolation mode, concurrency,
+        Docker image).
+    eval : EvalConfig
+        Controls parallel evaluation of test cases.
+    common : Common
+        Miscellaneous settings (e.g. logging).
+
+    The configuration is loaded once from a YAML file and cached as a
+    class-level singleton accessible via :meth:`get_instance_sync`.
+    """
 
     class SandboxConfig(BaseModel):
-        '''
-        lite: handcrafted overlayfs + chroot + cgroups isolation, fast (< 100 ms overhead)
-        full: Docker container isolation with resource limits
-        '''
+        """Sandbox execution environment settings.
+
+        Attributes
+        ----------
+        isolation : ``"lite"`` | ``"full"``
+            ``"lite"`` -- handcrafted overlayfs + chroot + cgroups isolation,
+            fast (< 100 ms overhead).
+            ``"full"`` -- Docker container isolation with resource limits.
+        max_concurrency : int
+            Maximum number of sandbox instances that may run in parallel.
+            Set to ``0`` to disable the internal concurrency limiter (useful
+            when concurrency is managed externally, e.g. by pytest-xdist).
+        docker_image : str
+            Docker image used when ``isolation`` is ``"full"``.
+            Defaults to ``"sandbox:base"``.
+        """
         isolation: Literal['lite', 'full']
         max_concurrency: int
         docker_image: str = 'sandbox:base'
 
     class EvalConfig(BaseModel):
+        """Evaluation runner settings.
+
+        Attributes
+        ----------
+        max_runner_concurrency : int
+            Maximum number of test cases evaluated concurrently by the
+            evaluation runner.  ``0`` means no limit.
+        """
         max_runner_concurrency: int = 0
 
     class Common(BaseModel):
+        """Miscellaneous / cross-cutting settings.
+
+        Attributes
+        ----------
+        logging_color : bool
+            When ``True``, structlog output includes ANSI colour codes.
+        """
         logging_color: bool
 
     sandbox: SandboxConfig
@@ -44,6 +98,13 @@ class RunConfig(BaseModel):
     common: Common
 
     def __init__(self):
+        """Load configuration from the YAML file indicated by ``SANDBOX_CONFIG``.
+
+        The environment variable ``SANDBOX_CONFIG`` (default ``"local"``)
+        selects the ``<name>.yaml`` file located alongside this module.  The
+        file is read, parsed with :func:`yaml.safe_load`, and the resulting
+        dict is forwarded to the pydantic ``BaseModel`` constructor.
+        """
         config_path = os.path.abspath(
             os.path.join(os.path.dirname(__file__), f'{os.getenv("SANDBOX_CONFIG", "local")}.yaml'))
         with open(config_path) as f:
@@ -55,6 +116,17 @@ class RunConfig(BaseModel):
 
     @classmethod
     def get_instance_sync(cls, *args, **kwargs) -> 'RunConfig':
+        """Return the cached singleton, creating it on first call.
+
+        If no instance exists yet, one is constructed (which triggers YAML
+        loading).  Subsequent calls return the same object.
+
+        Raises
+        ------
+        AssertionError
+            If the class defines an ``async_init`` method -- in that case
+            the caller should use the async counterpart instead.
+        """
         if not cls.__private_attributes__['_instance'].default:
             self = cls(*args, **kwargs)
             assert not hasattr(

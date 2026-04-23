@@ -12,6 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""FastAPI application entry point for the SandboxFusion server.
+
+Creates the main FastAPI application, conditionally mounts static file
+directories for the interactive playground (sandbox/pages/) and the
+documentation site (docs/build/), registers API routers for sandbox
+execution and evaluation submission, and installs a global exception
+handler that returns JSON-formatted tracebacks.
+"""
+
 import os
 import traceback
 
@@ -40,6 +49,13 @@ if os.path.isdir(docs_dir):
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
+    """Serve a client-side redirect to the ``/SandboxFusion`` documentation site.
+
+    Returns an HTML page whose inline JavaScript computes the correct
+    documentation URL relative to the current origin.  For deployments on
+    Hugging Face Spaces (``hf.space`` / ``huggingface.co``), the redirect
+    URL is rewritten to use HTTPS to avoid mixed-content issues.
+    """
     return '''
 <!DOCTYPE html>
 <html lang="en">
@@ -68,6 +84,12 @@ async def root():
 
 @app.exception_handler(Exception)
 async def base_exception_handler(request: Request, exc: Exception):
+    """Global fallback exception handler.
+
+    Catches any unhandled exception, formats a full Python traceback, and
+    returns it as a ``500`` JSON response with ``detail`` (the exception
+    message) and ``traceback`` (a list of traceback lines) fields.
+    """
     return JSONResponse(status_code=500, content={'detail': str(exc), 'traceback': traceback.format_exc().split('\n')})
 
 
@@ -77,4 +99,9 @@ app.include_router(submit_router, tags=['eval'])
 
 @app.get("/v1/ping")
 async def index():
+    """Health-check endpoint.
+
+    Returns the literal string ``"pong"`` to confirm the server is
+    running and reachable.
+    """
     return "pong"

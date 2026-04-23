@@ -11,6 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the Racket sandbox runner.
+
+Covers display output, timeout enforcement, and rackunit check-within
+assertions for a passing case.
+All tests are marked ``pytest.mark.minor``.
+"""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +30,7 @@ client = TestClient(app)
 
 @pytest.mark.minor
 def test_racket_print():
+    """Racket display should produce expected stdout."""
     request = RunCodeRequest(language='racket', code='''
 #lang racket
 
@@ -39,6 +46,7 @@ def test_racket_print():
 
 @pytest.mark.minor
 def test_racket_timeout():
+    """(sleep 10) exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='racket',
                              code='''
 #lang racket
@@ -57,6 +65,7 @@ def test_racket_timeout():
 
 @pytest.mark.minor
 def test_racket_assertion_success():
+    """Passing rackunit check-within assertions should result in Success status."""
     request = RunCodeRequest(language='racket',
                              code='''
 #lang racket

@@ -11,6 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the Scala sandbox runner.
+
+Covers println output, timeout enforcement, and Scala assert() for both
+passing and failing cases using both ``object ... def main`` and
+``object ... extends App`` entry-point styles.
+All tests are marked ``pytest.mark.minor``.
+"""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +31,7 @@ client = TestClient(app)
 
 @pytest.mark.minor
 def test_scala_print():
+    """Scala println should compile, run, and produce expected stdout."""
     request = RunCodeRequest(language='scala',
                              code='''
 object HelloWorld {
@@ -44,6 +52,7 @@ object HelloWorld {
 
 @pytest.mark.minor
 def test_scala_timeout():
+    """Thread.sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='scala',
                              code='''
 object HelloWorld {
@@ -64,6 +73,7 @@ object HelloWorld {
 
 @pytest.mark.minor
 def test_scala_assertion_success():
+    """Passing Scala assert() should succeed for both main-method and App-trait styles."""
     request = RunCodeRequest(language='scala',
                              code='''
     object HelloWorld {
@@ -99,6 +109,7 @@ def test_scala_assertion_success():
 
 @pytest.mark.minor
 def test_scala_assertion_error():
+    """Failing Scala assert() should result in Failed status with 'assertion failed' in stderr."""
     request = RunCodeRequest(language='scala',
                              code='''
 object HelloWorld {

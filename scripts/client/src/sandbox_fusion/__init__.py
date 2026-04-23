@@ -12,6 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""SandboxFusion Python SDK.
+
+Provides both synchronous and asynchronous clients for interacting with a
+SandboxFusion server, along with all request/response model classes and
+concurrency helpers.
+
+Synchronous API:
+    run_code, submit, submit_safe, summary_run_code_result, set_endpoint
+
+Asynchronous API:
+    run_code_async, submit_async, submit_safe_async
+
+Models:
+    RunCodeRequest, RunCodeResponse, EvalResult, SubmitRequest,
+    GeneralStdioTest, CommandRunStatus, RunStatus, SummaryMapping, TestConfig
+
+Concurrency helpers:
+    run_concurrent, run_concurrent_pure
+"""
+
 from .client import run_code, summary_run_code_result, submit, \
     submit_safe, set_endpoint
 from .async_client import run_code as run_code_async, submit as submit_async, \

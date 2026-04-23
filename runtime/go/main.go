@@ -1,3 +1,24 @@
+// Program main is a dependency pre-caching utility for the Go sandbox runtime.
+//
+// This program blank-imports a curated set of commonly-used Go libraries so that
+// running `go build` inside the sandbox compiles and caches their build artifacts
+// ahead of time. By pre-warming the Go build cache, subsequent user-submitted code
+// that depends on any of these packages will compile significantly faster because
+// the compiled objects are already present in the module cache.
+//
+// Imported library families include:
+//   - Testing:       testify
+//   - Uber:          atomic, automaxprocs, goleak, zap
+//   - ORM:           gorm
+//   - Observability: opentelemetry, opentracing
+//   - Configuration: viper, cobra, pflag
+//   - Serialization: yaml.v2, yaml.v3
+//   - Logging:       logrus
+//   - Golang-x:      oauth2, text
+//   - Miscellaneous:  go-enry (language detection), go-openapi/inflect
+//
+// The main function itself is trivial (prints "123") because the real purpose
+// of this program is the side-effect of compiling its dependency graph.
 package main
 
 import (

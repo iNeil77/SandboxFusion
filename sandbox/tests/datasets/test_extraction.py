@@ -11,6 +11,25 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Tests for code extraction from free-form LLM completions.
+
+Validates the extraction utilities that pull executable code out of
+markdown-fenced and unfenced LLM responses.  Three extraction paths are
+exercised:
+
+* **v1** (``extract_code_from_freeform_completion``) -- fenced blocks,
+  incomplete fences, exact language match, and assert removal.
+* **v2** (``extract_code_from_freeform_completion_v2``) -- language-aware
+  post-processing for Scala, Go, Java, JavaScript, Python, C#, Racket,
+  Swift, and Kotlin (inner-function extraction, ``__main__`` removal,
+  ``package`` removal, etc.).
+* **custom** (``default_extract_helper`` with ``custom_extract_logic``) --
+  user-supplied extraction scripts using ``SOLUTION_START`` / ``SOLUTION_END``
+  markers.
+
+Each test case pairs a synthetic LLM completion string with the expected
+extracted output and asserts that the extraction result matches.
+"""
 
 from sandbox.utils.extraction import extract_code_from_freeform_completion, extract_code_from_freeform_completion_v2, default_extract_helper
 
@@ -90,6 +109,14 @@ assert a == 1
 
 
 def test_extract_code_from_freeform_completion():
+    """Verify v1 extraction handles fenced, incomplete-fenced, exact-match, and assert-removal modes.
+
+    Exercises four scenarios:
+    - A properly fenced Python block is extracted with type 'fenced'.
+    - An incomplete fence (missing closing ```) falls back to 'incomplete_fenced'.
+    - Exact language match selects the correct block when multiple fences exist.
+    - ``remove_asserts=True`` strips trailing assert statements from the result.
+    """
     r1, t1 = extract_code_from_freeform_completion(completion1)
     assert r1.strip() == result1.strip() and t1 == 'fenced'
     r2, t2 = extract_code_from_freeform_completion(completion2)
@@ -582,6 +609,20 @@ func main() {
 
 
 def test_extract_code_from_freeform_completion_v2():
+    """Verify v2 extraction with language-specific post-processing across many languages.
+
+    Covers the following behaviours:
+    - Scala: strips ``object Main extends App`` wrapper, keeps inner functions.
+    - Go: removes ``package main`` unless ``no_removal=True``; removes ``func main``.
+    - Java: removes ``public class Solution`` wrapper; ``inner_function_only`` extracts methods.
+    - JavaScript: exact-match extraction returns 'fenced' type.
+    - Python: strips ``if __name__ == "__main__"`` block (unless ``is_ut=True``);
+      ``first_block_only`` selects the first code fence; ``remove_asserts`` strips asserts.
+    - C#: ``inner_function_only`` extracts static methods from a ``class Problem`` wrapper.
+    - Racket / Swift: validates correct extraction type for fenced blocks.
+    - Kotlin: removes ``fun main`` block even with ``no_removal=True``.
+    - Go (complex): removes ``func main`` but keeps ``package main`` when ``no_removal=True``.
+    """
     r1, t1 = extract_code_from_freeform_completion_v2(v2_completion1, 'scala')
     assert r1.strip() == v2_result1.strip() and t1 == 'fenced'
     r2, t2 = extract_code_from_freeform_completion_v2(v2_completion2, 'scala')
@@ -727,6 +768,13 @@ This approach ensures that we find the minimum cost efficiently.
 
 
 def test_custom_code_block():
+    """Verify custom_extract_logic can use user-supplied scripts to extract code.
+
+    The custom logic finds the first fenced code block, then truncates it at
+    the first ``assert`` statement, simulating a SOLUTION_START/END extraction
+    pattern.  Asserts that the returned code matches the expected function body
+    without the trailing assert or example-usage lines.
+    """
     res = default_extract_helper(completion=default_completion_1,
                                  language='python',
                                  custom_extract_logic='''

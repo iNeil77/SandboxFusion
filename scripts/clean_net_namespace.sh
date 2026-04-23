@@ -1,4 +1,13 @@
 #!/bin/bash
+# =============================================================================
+# clean_net_namespace.sh -- Tear down a Linux network namespace
+# =============================================================================
+# Usage: sudo bash clean_net_namespace.sh <namespace_name> <subnet> [--no-bridge]
+#
+# Reverses the setup performed by create_net_namespace.sh. Removes the NAT
+# iptables rule (unless --no-bridge was used) and deletes the namespace.
+# Deleting the namespace automatically destroys the associated veth pair.
+# =============================================================================
 set -e
 
 usage() {
@@ -6,6 +15,7 @@ usage() {
     exit 1
 }
 
+# --- Argument validation ---
 if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
     usage
 fi
@@ -23,12 +33,12 @@ if [ "$#" -eq 3 ]; then
 fi
 
 if $CLEAN_BRIDGE; then
-    # Remove NAT rules
+    # --- Remove the NAT masquerade rule that was added during namespace creation ---
     EXTERNAL_IFACE=$(ip route | grep default | awk '{print $5}')
     sudo iptables -w -t nat -D POSTROUTING -s ${SUBNET}.0/24 -o $EXTERNAL_IFACE -j MASQUERADE
 fi
 
-# Delete namespace
+# --- Delete the namespace (also destroys the associated veth pair) ---
 sudo ip netns delete $NAMESPACE
 
 echo "Namespace $NAMESPACE cleaned up"

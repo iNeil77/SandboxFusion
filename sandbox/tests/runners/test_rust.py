@@ -11,6 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the Rust sandbox runner.
+
+Covers println! output, timeout enforcement, assert_eq! assertion
+errors, compilation errors, and stdin delivery.
+"""
 
 from fastapi.testclient import TestClient
 
@@ -22,6 +27,7 @@ client = TestClient(app)
 
 
 def test_rust_print():
+    """println! should compile, run, and produce expected stdout."""
     request = RunCodeRequest(language='rust',
                              code='''
     fn main() {
@@ -39,6 +45,7 @@ def test_rust_print():
 
 
 def test_rust_timeout():
+    """thread::sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='rust',
                              code='''
     use std::{thread, time};
@@ -58,6 +65,7 @@ def test_rust_timeout():
 
 
 def test_rust_assertion_error():
+    """assert_eq! with mismatched values should produce an assertion panic in stderr."""
     request = RunCodeRequest(language='rust', code='''
     fn main() {
         assert_eq!(1, 2);
@@ -72,6 +80,7 @@ def test_rust_assertion_error():
 
 
 def test_rust_compile_error():
+    """A type mismatch should fail at compilation with a non-zero return code and no run_result."""
     request = RunCodeRequest(language='rust',
                              code='''
     fn main() {
@@ -89,6 +98,7 @@ def test_rust_compile_error():
 
 
 def test_rust_stdin():
+    """Stdin data should be delivered to the Rust program and readable via io::stdin."""
     request = RunCodeRequest(language='rust',
                              code='''
     use std::io;

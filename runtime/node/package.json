@@ -1,7 +1,7 @@
 {
   "name": "coderunner",
   "version": "1.0.0",
-  "description": "",
+  "description": "Node.js runtime dependencies for SandboxFusion code execution sandbox. Includes Babel and Jest for TypeScript transpilation and testing, Puppeteer for headless browser automation, jsdom and testing-library for DOM testing, and general-purpose utility libraries.",
   "main": "index.js",
   "scripts": {
     "test": "FORCE_COLOR=0 jest"

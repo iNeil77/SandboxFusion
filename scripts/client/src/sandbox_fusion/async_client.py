@@ -12,6 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Asynchronous HTTP client for the SandboxFusion server.
+
+Provides ``async`` versions of the core client operations (:func:`run_code`,
+:func:`submit`, :func:`submit_safe`) using ``aiohttp``. Retry behaviour is
+inherited from :func:`sandbox_fusion.client.configurable_retry`.
+"""
+
 import aiohttp
 import logging
 from typing import Optional
@@ -30,6 +37,23 @@ async def run_code(request: RunCodeRequest,
                    endpoint: str = '',
                    max_attempts: int = 5,
                    client_timeout: Optional[float] = None) -> RunCodeResponse:
+    """Execute code on the sandbox server (async).
+
+    Async equivalent of :func:`sandbox_fusion.client.run_code`. Sends a POST
+    to ``/run_code`` via ``aiohttp`` with automatic retry on transient errors.
+
+    Args:
+        request: The code execution request payload.
+        endpoint: Optional override for the server URL.
+        max_attempts: Maximum number of retry attempts (default 5).
+        client_timeout: Optional HTTP timeout in seconds.
+
+    Returns:
+        A :class:`RunCodeResponse` with compilation/run results.
+
+    Raises:
+        Exception: On non-200 HTTP status or a ``SandboxError`` response.
+    """
 
     @configurable_retry(max_attempts)
     async def _run_code(request: RunCodeRequest) -> RunCodeResponse:
@@ -51,6 +75,23 @@ async def submit(request: SubmitRequest,
                  endpoint: str = '',
                  max_attempts: int = 5,
                  client_timeout: Optional[float] = None) -> EvalResult:
+    """Submit code for evaluation against test cases (async).
+
+    Async equivalent of :func:`sandbox_fusion.client.submit`. Sends a POST
+    to ``/submit`` via ``aiohttp``.
+
+    Args:
+        request: The submission payload including completion and test cases.
+        endpoint: Optional override for the server URL.
+        max_attempts: Maximum number of retry attempts (default 5).
+        client_timeout: Optional HTTP timeout in seconds.
+
+    Returns:
+        An :class:`EvalResult` indicating whether the submission was accepted.
+
+    Raises:
+        Exception: On non-200 HTTP status.
+    """
 
     @configurable_retry(max_attempts)
     async def _submit(request: SubmitRequest) -> EvalResult:
@@ -70,6 +111,21 @@ async def submit_safe(request: SubmitRequest,
                       endpoint: str = '',
                       max_attempts: int = 5,
                       client_timeout: Optional[float] = None) -> EvalResult:
+    """Submit code for evaluation, returning a rejected result on failure (async).
+
+    Async equivalent of :func:`sandbox_fusion.client.submit_safe`. Catches
+    all exceptions and returns a synthetic rejected :class:`EvalResult`.
+
+    Args:
+        request: The submission payload including completion and test cases.
+        endpoint: Optional override for the server URL.
+        max_attempts: Maximum number of retry attempts (default 5).
+        client_timeout: Optional HTTP timeout in seconds.
+
+    Returns:
+        An :class:`EvalResult`. On error, ``accepted`` is ``False`` and
+        ``tests`` is empty.
+    """
     try:
         return await submit(request, endpoint, max_attempts, client_timeout)
     except Exception:

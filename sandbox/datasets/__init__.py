@@ -12,4 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Evaluation types package. Re-exports all types from datasets.types.
+
+Consumers can simply ``from sandbox.datasets import EvalResult, SubmitRequest``
+(or any other public name) without reaching into the ``types`` sub-module.
+"""
+
 from sandbox.datasets.types import *  # nopycln: import

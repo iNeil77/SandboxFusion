@@ -11,6 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the Kotlin script sandbox runner.
+
+Covers println output, timeout enforcement, and exception-based
+assertions for both passing and failing cases.
+All tests are marked ``pytest.mark.minor``.
+"""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +30,7 @@ client = TestClient(app)
 
 @pytest.mark.minor
 def test_kotlin_script_print():
+    """println should produce expected stdout in Kotlin script mode."""
     request = RunCodeRequest(language='kotlin_script', code='''
 println("Hello, World!")
     ''', run_timeout=30)
@@ -36,6 +43,7 @@ println("Hello, World!")
 
 @pytest.mark.minor
 def test_kotlin_script_timeout():
+    """Thread.sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='kotlin_script',
                              code='''
 fun main() {
@@ -59,6 +67,7 @@ main()
 
 @pytest.mark.minor
 def test_kotlin_script_assertion_success():
+    """A matching expected value should not throw and should result in Success status."""
     request = RunCodeRequest(language='kotlin_script',
                              code='''
 fun minCost() : Int {
@@ -85,6 +94,7 @@ main()
 
 @pytest.mark.minor
 def test_kotlin_script_assertion_error():
+    """A mismatched expected value should throw an Exception and result in Failed status."""
     request = RunCodeRequest(language='kotlin_script',
                              code='''
 fun minCost() : Int {

@@ -7,6 +7,12 @@ run:
 run-online:
 	uvicorn sandbox.server.server:app --host $(HOST) --port $(PORT)
 
+install-runtimes:
+	cd runtime/python && bash install-python-runtime.sh
+	cd runtime/node && npm ci
+	cd runtime/go && go build
+	cd runtime/lean && lake build
+
 build-base-image:
 	docker build . -f scripts/Dockerfile.base -t sandbox:base
 

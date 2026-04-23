@@ -11,6 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the D (with unittest) sandbox runner.
+
+Covers stdout output, timeout enforcement, and the built-in D
+``unittest`` block for both passing and failing assertions.
+All tests are marked ``pytest.mark.minor``.
+"""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +30,7 @@ client = TestClient(app)
 
 @pytest.mark.minor
 def test_D_ut_print():
+    """writeln should produce expected stdout after compilation and execution."""
     request = RunCodeRequest(language='D_ut',
                              code='''
 import std.stdio; 
@@ -43,6 +50,7 @@ void main(string[] args) {
 
 @pytest.mark.minor
 def test_D_ut_timeout():
+    """A sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='D_ut',
                              code='''
 import core.thread;
@@ -68,6 +76,7 @@ void main() {
 
 @pytest.mark.minor
 def test_D_ut_assertion_success():
+    """A passing D unittest assertion should result in Success status."""
     request = RunCodeRequest(language='D_ut', code='''
 unittest
 {
@@ -84,6 +93,7 @@ void main(){}
 
 @pytest.mark.minor
 def test_D_ut_assertion_error():
+    """A failing D unittest assertion should result in Failed status."""
     request = RunCodeRequest(language='D_ut', code='''
 unittest
 {

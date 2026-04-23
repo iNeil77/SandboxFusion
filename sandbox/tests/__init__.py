@@ -11,6 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""SandboxFusion test package.
+
+Sets the default asyncio scope for all tests in this package to
+``"package"`` so that async fixtures and tests share a single event loop
+per package rather than per function.
+"""
 
 import pytest
 

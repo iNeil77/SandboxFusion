@@ -12,6 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Shared utility functions for the sandbox framework.
+
+Provides common helpers used across the codebase including random string
+generation, async context manager pooling, conda environment detection,
+PHP code normalization, JSON parsing, string truncation, and JSONL file loading.
+"""
+
 import functools
 import json
 import os
@@ -25,16 +32,49 @@ from typing import Any, Dict
 
 
 def generate_random_string(length):
+    """Generate a cryptographically secure random alphanumeric string.
+
+    Uses the ``secrets`` module for secure randomness, suitable for tokens,
+    identifiers, and other security-sensitive contexts.
+
+    Args:
+        length: The desired length of the generated string.
+
+    Returns:
+        A random string of the specified length composed of ASCII letters
+        and digits.
+    """
     characters = string.ascii_letters + string.digits
     random_string = ''.join(secrets.choice(characters) for _ in range(length))
     return random_string
 
 
 def random_cgroup_name() -> str:
+    """Generate a random 6-character lowercase name for cgroup/namespace identifiers.
+
+    Returns:
+        A 6-character string of random lowercase ASCII letters.
+    """
     return ''.join(random.choice(string.ascii_lowercase) for _ in range(6))
 
 
 def cached_context(cm_factory):
+    """Decorator that pools resources from an async context manager factory.
+
+    Wraps an async context manager factory so that resources are reused instead
+    of being created and torn down on every use. On the first call with a given
+    set of arguments, a new resource is created via the factory's ``__aenter__``.
+    On subsequent calls with the same arguments, a previously returned resource
+    is reused from the pool. When the ``async with`` block exits, the resource
+    is returned to the pool rather than being destroyed.
+
+    Args:
+        cm_factory: An async context manager factory (a callable that returns
+            an async context manager).
+
+    Returns:
+        A wrapped async context manager factory with resource pooling behavior.
+    """
 
     def hash_args(args, kwargs):
         return str(args) + str(kwargs)
@@ -59,6 +99,17 @@ def cached_context(cm_factory):
 
 
 def find_conda_root():
+    """Locate the conda root directory by walking up from the current Python executable.
+
+    Traverses parent directories starting from ``sys.executable`` looking for a
+    directory that contains a ``condabin/`` subdirectory, which indicates the
+    conda installation root.
+
+    Returns:
+        The absolute path to the conda root directory if found, or an error
+        message string if the conda root could not be located or an unexpected
+        error occurred.
+    """
     try:
         python_executable = sys.executable
         env_root = python_executable
@@ -98,6 +149,18 @@ def ensure_php_tag_in_string(php_code: str) -> str:
 
 
 def ensure_json(obj: Dict[str, Any], key: str) -> Dict[str, Any]:
+    """Ensure that a dictionary value at the given key is parsed from JSON.
+
+    If ``obj[key]`` is a JSON string, it is parsed in-place into a dict.
+    If it is already a dict (or other non-string type), it is returned as-is.
+
+    Args:
+        obj: The dictionary containing the value to check.
+        key: The key whose value should be ensured as parsed JSON.
+
+    Returns:
+        The parsed (or already-parsed) value at ``obj[key]``.
+    """
     if isinstance(obj[key], str):
         obj[key] = json.loads(obj[key], strict=False)
     return obj[key]
@@ -129,6 +192,16 @@ def truncate_str(s: str, max_length: int = 1000, placeholder: str = '...') -> st
 
 
 def load_jsonl(file_path):
+    """Load a JSON Lines (.jsonl) file into a list of dictionaries.
+
+    Each line in the file is expected to be a valid JSON object.
+
+    Args:
+        file_path: Path to the .jsonl file to read.
+
+    Returns:
+        A list of dictionaries, one per line in the file.
+    """
     with open(file_path, 'r') as f:
         data = [json.loads(line) for line in f.readlines()]
     return data

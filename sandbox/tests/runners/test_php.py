@@ -11,6 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the PHP sandbox runner.
+
+Covers echo output, timeout enforcement, E_USER_ERROR triggering, and
+stdin delivery via readline.
+"""
 
 from fastapi.testclient import TestClient
 
@@ -22,6 +27,7 @@ client = TestClient(app)
 
 
 def test_php_print():
+    """PHP echo should produce expected stdout."""
     request = RunCodeRequest(language='php', code='''
     <?php
     echo "123";
@@ -35,6 +41,7 @@ def test_php_print():
 
 
 def test_php_timeout():
+    """sleep(2) exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='php',
                              code='''
     <?php
@@ -50,6 +57,7 @@ def test_php_timeout():
 
 
 def test_php_error():
+    """trigger_error with E_USER_ERROR should produce the error message and a Failed status."""
     request = RunCodeRequest(language='php',
                              code='''
     <?php
@@ -64,6 +72,7 @@ def test_php_error():
 
 
 def test_php_stdin():
+    """Stdin data should be delivered to the PHP process and readable via readline."""
     request = RunCodeRequest(language='php',
                              code='''
     <?php

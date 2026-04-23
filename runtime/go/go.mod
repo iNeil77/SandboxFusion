@@ -1,3 +1,8 @@
+// Module SeedSandbox defines the Go module and dependency set for the
+// SandboxFusion Go runtime environment. These dependencies are fetched and
+// compiled during the sandbox Docker image build so that user-submitted Go
+// programs can import any of these packages without incurring a download or
+// compilation delay at execution time. The toolchain is pinned to Go 1.22.
 module SeedSandbox
 
 go 1.22

@@ -11,6 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the Perl sandbox runner.
+
+Covers print output, timeout enforcement, and Test::Deep / eq_deeply
+assertions for both passing and failing cases.
+All tests are marked ``pytest.mark.minor``.
+"""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +30,7 @@ client = TestClient(app)
 
 @pytest.mark.minor
 def test_perl_print():
+    """Perl print should produce expected stdout."""
     request = RunCodeRequest(language='perl', code='''
 print "Hello, World!\n";
     ''', run_timeout=5)
@@ -37,6 +44,7 @@ print "Hello, World!\n";
 
 @pytest.mark.minor
 def test_perl_timeout():
+    """sleep(5) exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='perl',
                              code='''
 sleep(5);
@@ -52,6 +60,7 @@ print("Finished waiting for 5 seconds.")
 
 @pytest.mark.minor
 def test_perl_assertion_success():
+    """A passing eq_deeply comparison should result in Success status."""
     request = RunCodeRequest(language='perl',
                              code='''
 use Test::Deep;
@@ -75,6 +84,7 @@ test();
 
 @pytest.mark.minor
 def test_perl_assertion_error():
+    """A failing eq_deeply comparison should exit 1 and result in Failed status."""
     request = RunCodeRequest(language='perl',
                              code='''
 use Test::Deep;

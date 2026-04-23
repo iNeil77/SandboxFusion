@@ -12,6 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Structured logging configuration using structlog.
+
+Configures the structlog processing pipeline for the sandbox application,
+including stdout console rendering (with optional color), optional JSON file
+output for tracing, and silencing of noisy third-party loggers.
+"""
+
 import logging
 import sys
 
@@ -23,6 +30,24 @@ config = RunConfig.get_instance_sync()
 
 
 def configure_logging(trace_file=None):
+    """Set up the structlog logging pipeline and handlers.
+
+    Configures structlog with a standard processing chain (level filtering,
+    logger name, log level, positional args formatting, timestamps, stack
+    info, and exception formatting). Sets up:
+
+    - A stdout ``StreamHandler`` with ``ConsoleRenderer`` (color controlled
+      by ``RunConfig.common.logging_color``).
+    - An optional JSON ``FileHandler`` when ``trace_file`` is provided, useful
+      for machine-readable trace output.
+
+    Also silences noisy loggers: ``aiosqlite``, ``databases``, and
+    ``uvicorn.access``.
+
+    Args:
+        trace_file: Optional file path for JSON-formatted trace output. If
+            ``None``, only stdout logging is configured.
+    """
 
     def filter_keys(_, __, event_dict):
         event_dict.pop('_from_structlog', None)

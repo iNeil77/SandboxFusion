@@ -11,6 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the pytest sandbox runner.
+
+Verifies that the same code produces Success when run as plain Python
+(where test classes are ignored) and then correctly passes or fails when
+run under the ``pytest`` runner, which discovers and executes the test
+classes.
+"""
 
 from fastapi.testclient import TestClient
 
@@ -115,6 +122,7 @@ class Testword_count:
 
 
 def test_pytest_pass():
+    """Code with correct assertions should pass both as plain Python and under pytest."""
     request = RunCodeRequest(language='python', code=code, run_timeout=5)
     response = client.post('/run_code', json=request.model_dump())
     assert response.status_code == 200
@@ -130,6 +138,12 @@ def test_pytest_pass():
 
 
 def test_pytest_fail():
+    """Code with inverted assertions should succeed as plain Python but fail under pytest.
+
+    As plain Python the test class is never executed (no test runner), so
+    the script succeeds.  Under the pytest runner the inverted ``not in``
+    assertions cause test failures.
+    """
     request = RunCodeRequest(language='python', code=fail_code, run_timeout=5)
     response = client.post('/run_code', json=request.model_dump())
     assert response.status_code == 200

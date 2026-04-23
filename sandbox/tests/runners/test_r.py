@@ -11,6 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the R sandbox runner.
+
+Covers print output, timeout enforcement, and stopifnot assertions for
+both passing and failing cases.
+All tests are marked ``pytest.mark.minor``.
+"""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -24,6 +30,7 @@ client = TestClient(app)
 
 @pytest.mark.minor
 def test_r_print():
+    """R print should produce expected stdout."""
     request = RunCodeRequest(language='R',
                              code='''
 myString <- "Hello, World!"
@@ -40,6 +47,7 @@ print ( myString )
 
 @pytest.mark.minor
 def test_r_timeout():
+    """Sys.sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='R',
                              code='''
 Sys.sleep(5)
@@ -55,6 +63,7 @@ print("Finished waiting for 5 seconds.")
 
 @pytest.mark.minor
 def test_r_assertion_success():
+    """A passing stopifnot assertion should result in Success status."""
     request = RunCodeRequest(language='R', code='''
 stopifnot(isTRUE(all.equal(0, 0)))
     ''')
@@ -67,6 +76,7 @@ stopifnot(isTRUE(all.equal(0, 0)))
 
 @pytest.mark.minor
 def test_r_assertion_error():
+    """A failing stopifnot assertion should result in Failed status with 'Execution halted' in stderr."""
     request = RunCodeRequest(language='R', code='''
 stopifnot(isTRUE(all.equal(1, 0)))
     ''')

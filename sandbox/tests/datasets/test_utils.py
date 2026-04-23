@@ -11,6 +11,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Tests for dataset utility helpers.
+
+Covers:
+
+* **Jest report parsing** -- runs a TypeScript Jest test suite that contains
+  intentional failures, fetches the JSON report artifact, and verifies that
+  :func:`~sandbox.utils.testing.parse_jest_cases` correctly counts 9 passed
+  and 2 failed cases.
+* **Null file asset compatibility** -- ensures that a ``None`` value in the
+  ``files`` dict of a :class:`RunCodeRequest` does not crash execution.
+"""
 
 import base64
 from collections import Counter
@@ -85,6 +96,14 @@ describe('Calculator Tests', () => {
 
 
 async def test_utils_jest_report():
+    """Run a Jest suite with intentional failures and verify the parsed report.
+
+    Executes the ``JEST_CODE`` fixture via the Jest runner, fetches the
+    ``jest-report.json`` artifact, decodes it from base64, and feeds it to
+    ``parse_jest_cases``.  Asserts that 9 test cases passed and 2 failed,
+    matching the intentional assertion mismatches in the fixture (Division
+    ``10 / 2`` expected as 235, and string concatenation typo).
+    """
     request = RunCodeRequest(code=JEST_CODE, language='jest', fetch_files=['jest-report.json'])
     response = client.post('/run_code', json=request.model_dump())
     assert response.status_code == 200
@@ -97,6 +116,12 @@ async def test_utils_jest_report():
 
 
 async def test_compatibility_with_null_asset():
+    """Ensure that a None value in the files dict does not crash execution.
+
+    Some callers may pass ``{'a.txt': None}`` to indicate a file entry with
+    no content.  The runner must tolerate this gracefully and still execute
+    the code, producing normal stdout output.
+    """
     request = RunCodeRequest(code='print(123)', language='python', files={'a.txt': None})
     response = client.post('/run_code', json=request.model_dump())
     assert response.status_code == 200

@@ -11,6 +11,12 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the Jest (TypeScript) sandbox runner.
+
+Covers a passing Jest test suite and a failing one (stub implementation
+that returns 0), verifying that the runner correctly reports Success or
+Failed status based on Jest exit codes.
+"""
 
 from fastapi.testclient import TestClient
 
@@ -22,6 +28,7 @@ client = TestClient(app)
 
 
 def test_jest_pass():
+    """A correct MinSubArrayLen implementation should pass all Jest test cases."""
     request = RunCodeRequest(language='jest',
                              code='''
 import { describe, expect, test } from '@jest/globals';
@@ -74,6 +81,7 @@ describe('MinSubArrayLen', () => {
 
 
 def test_jest_fail():
+    """A stub implementation (always returns 0) should fail the Jest test suite."""
     request = RunCodeRequest(language='jest',
                              code='''
 import { describe, expect, test } from '@jest/globals';

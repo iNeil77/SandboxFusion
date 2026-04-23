@@ -11,6 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the Go sandbox runner.
+
+Covers stdout output via fmt.Println, timeout enforcement, and stdin
+delivery via fmt.Scan.
+"""
 
 from fastapi.testclient import TestClient
 
@@ -22,6 +27,7 @@ client = TestClient(app)
 
 
 def test_golang_print():
+    """fmt.Println should compile, run, and produce expected stdout."""
     request = RunCodeRequest(language='go',
                              code='''
     package main
@@ -44,6 +50,7 @@ def test_golang_print():
 
 
 def test_golang_timeout():
+    """time.Sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='go',
                              code='''
     package main
@@ -66,6 +73,7 @@ def test_golang_timeout():
 
 
 def test_golang_stdin():
+    """Stdin data should be delivered to the Go program and readable via fmt.Scan."""
     request = RunCodeRequest(language='go',
                              code='''
     package main

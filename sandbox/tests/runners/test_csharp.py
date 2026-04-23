@@ -11,6 +11,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+"""Basic happy-path tests for the C# sandbox runner.
+
+Covers console output, timeout enforcement, Debug.Assert assertion
+errors, and stdin delivery.
+"""
 
 from fastapi.testclient import TestClient
 
@@ -22,6 +27,7 @@ client = TestClient(app)
 
 
 def test_csharp_print():
+    """Console.WriteLine should produce expected stdout after compilation and execution."""
     request = RunCodeRequest(language='csharp',
                              code='''
     using System;
@@ -43,6 +49,7 @@ def test_csharp_print():
 
 
 def test_csharp_timeout():
+    """Thread.Sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='csharp',
                              code='''
     using System;
@@ -66,6 +73,7 @@ def test_csharp_timeout():
 
 
 def test_csharp_assertion_error():
+    """A Debug.Assert failure should produce the assertion message in stderr and a Failed status."""
     request = RunCodeRequest(language='csharp',
                              code='''
     using System;
@@ -88,6 +96,7 @@ def test_csharp_assertion_error():
 
 
 def test_csharp_stdin():
+    """Stdin data should be delivered to the C# program and readable via Console.ReadLine."""
     request = RunCodeRequest(language='csharp',
                              code='''
     public class Program

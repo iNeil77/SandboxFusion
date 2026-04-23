@@ -109,6 +109,7 @@ def test_python_stderr_stdout_separation():
 
 
 def test_cpp_stderr_stdout_separation():
+    """C++ stderr and stdout must be captured into separate fields."""
     code = '''
     #include <iostream>
     int main() {
@@ -443,6 +444,7 @@ def test_python_runtime_exception():
 
 
 def test_python_zero_division():
+    """ZeroDivisionError should be reported in stderr with a Failed status."""
     code = 'print(1/0)'
     request = RunCodeRequest(language='python', code=code, run_timeout=5)
     response = client.post('/run_code', json=request.model_dump())
@@ -453,6 +455,7 @@ def test_python_zero_division():
 
 
 def test_python_import_nonexistent_module():
+    """Importing a missing module should produce ModuleNotFoundError in stderr."""
     code = 'import nonexistent_module_xyz_abc'
     request = RunCodeRequest(language='python', code=code, run_timeout=5)
     response = client.post('/run_code', json=request.model_dump())
@@ -501,6 +504,7 @@ raise RuntimeError("boom")
 
 
 def test_cpp_output_before_nonzero_exit():
+    """Stdout written before a non-zero exit should still be captured in C++."""
     code = '''
     #include <iostream>
     int main() {
@@ -764,6 +768,7 @@ print(sum(nums))
 
 
 def test_cpp_stdin_algorithmic_problem():
+    """Simulate a typical OJ problem in C++: read N integers from stdin and print their sum."""
     code = '''
     #include <iostream>
     int main() {
