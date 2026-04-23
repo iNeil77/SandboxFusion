@@ -77,7 +77,7 @@ def test_scala_assertion_success():
     request = RunCodeRequest(language='scala',
                              code='''
     object HelloWorld {
-        def main(args: Array[String]) = {
+        def main(args: Array[String]): Unit = {
             assert((0l) == (0l));
         }
     }
@@ -92,7 +92,7 @@ def test_scala_assertion_success():
     request = RunCodeRequest(language='scala',
                              code='''
     object Main extends App {
-        def foo() = {
+        def foo(): Unit = {
             assert((0l) == (0l));
         }
 
@@ -113,7 +113,7 @@ def test_scala_assertion_error():
     request = RunCodeRequest(language='scala',
                              code='''
 object HelloWorld {
-    def main(args: Array[String]) = {
+    def main(args: Array[String]): Unit = {
         assert((1l) == (0l));
     }
 }
@@ -129,7 +129,7 @@ object HelloWorld {
     request = RunCodeRequest(language='scala',
                              code='''
     object Main extends App {
-        def foo() = {
+        def foo(): Unit = {
             assert((1l) == (0l));
         }
 

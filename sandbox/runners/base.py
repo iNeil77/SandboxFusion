@@ -102,7 +102,7 @@ async def run_command_bare(command: str | List[str],
             try:
                 if p.stdin:
                     p.stdin.write(stdin.encode())
-                    p.stdin.flush()
+                    await p.stdin.drain()
                 else:
                     logger.warning("Attempted to write to stdin, but stdin is closed.")
             except Exception as e:
@@ -210,7 +210,7 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
         docker_image = config.sandbox.docker_image
         mem_limit = f'{args.memory_limit_MB}m' if args.memory_limit_MB > 0 else '4g'
         docker_prefix = [
-            'docker', 'run', '--rm',
+            'docker', 'run', '--rm', '-i',
             '--memory', mem_limit,
             '--cpus', '1',
             '--network', 'none',

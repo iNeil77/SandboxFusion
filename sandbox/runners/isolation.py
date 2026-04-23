@@ -64,6 +64,39 @@ def _detect_cgroup_version() -> int:
 
 CGROUP_VERSION = _detect_cgroup_version()
 
+_cgroup_v2_initialized = False
+
+
+def _init_cgroup_v2_delegation():
+    """Enable memory+cpu controllers on the root cgroup for v2.
+
+    Cgroup v2 requires that no processes live in the root cgroup when
+    enabling subtree_control.  We move ALL processes into an ``init``
+    child cgroup first, then enable the controllers.  This is idempotent
+    and uses subprocess calls to ensure root privileges via sudo.
+    """
+    global _cgroup_v2_initialized
+    if _cgroup_v2_initialized:
+        return
+    try:
+        import subprocess
+        init_cg = '/sys/fs/cgroup/sandbox_init'
+        subprocess.run(['sudo', 'mkdir', '-p', init_cg], check=True)
+        # Move all root-cgroup processes into the init child
+        with open('/sys/fs/cgroup/cgroup.procs') as f:
+            pids = f.read().splitlines()
+        for pid in pids:
+            if pid.strip():
+                subprocess.run(
+                    ['sudo', 'bash', '-c', f'echo {pid.strip()} > {init_cg}/cgroup.procs'],
+                    check=False)
+        subprocess.run(
+            ['sudo', 'bash', '-c', 'echo "+memory +cpu" > /sys/fs/cgroup/cgroup.subtree_control'],
+            check=True)
+        _cgroup_v2_initialized = True
+    except Exception as e:
+        logger.warning(f'Failed to initialize cgroup v2 delegation: {e}')
+
 
 async def execute_command(cmd: List[str], raise_nonzero: bool = True):
     """Run a command as an async subprocess and optionally raise on failure.
@@ -212,6 +245,7 @@ async def tmp_cgroup(mem_limit: Optional[str] = None, cpu_limit: Optional[float]
         raise Exception('every resource is unlimited, no need for cgroup')
 
     if CGROUP_VERSION == 2:
+        _init_cgroup_v2_delegation()
         cg_name = f'sandbox_{random_cgroup_name()}'
         cg_path = f'/sys/fs/cgroup/{cg_name}'
         await execute_command(['sudo', 'mkdir', '-p', cg_path])

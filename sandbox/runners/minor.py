@@ -56,7 +56,8 @@ async def run_lua(args: CodeRunArgs) -> CodeRunResult:
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.lua', delete=False) as f:
             f.write(args.code)
 
-        return await run_commands(None, f'lua {f.name}', tmp_dir, {}, args)
+        lua_env = {'LUA_PATH': '/usr/local/share/lua/5.1/?.lua;;'}
+        return await run_commands(None, f'lua {f.name}', tmp_dir, lua_env, args)
 
 
 async def run_r(args: CodeRunArgs) -> CodeRunResult:
@@ -115,7 +116,18 @@ async def run_scala(args: CodeRunArgs) -> CodeRunResult:
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.scala', delete=False) as f:
             f.write(args.code)
 
-        return await run_commands(f'scalac {f.name}', f'scala {classname}', tmp_dir, {}, args)
+        # Scala 3.x `scala` is now scala-cli and no longer supports `scala ClassName`.
+        # Use `java -cp` with Scala library jars from the coursier cache instead.
+        scala_cp = (
+            'SCALA_CP=$('
+            'find /root/.cache/coursier/v1 -name "scala-library-*.jar" -not -name "*sources*" '
+            '2>/dev/null | sort -V | tail -1);'
+            'SCALA3_CP=$('
+            'find /root/.cache/coursier/v1 -name "scala3-library_3-*.jar" -not -name "*sources*" '
+            '2>/dev/null | sort -V | tail -1);'
+        )
+        run_cmd = f'{scala_cp} java -cp ".:$SCALA_CP:$SCALA3_CP" {classname}'
+        return await run_commands(f'scalac {f.name}', run_cmd, tmp_dir, {}, args)
 
 
 async def run_julia(args: CodeRunArgs) -> CodeRunResult:

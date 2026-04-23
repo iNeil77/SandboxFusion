@@ -58,7 +58,7 @@ RUN curl -o /workspace/download/node.tar.gz -SL https://nodejs.org/dist/v24.0.0/
     && rm /workspace/download/node.tar.gz
 ENV PATH=/usr/local/lib/nodejs/node/bin:$PATH
 ENV NODE_PATH=/usr/local/lib/node_modules
-RUN npm install -g typescript@5.8.3 tsx@4.19.4
+RUN npm install -g typescript@5.8.3 tsx@4.19.4 lodash @types/lodash jest @jest/globals ts-jest
 
 # ---------------------------------------------------------------------------
 # GCC 15.2, Boost, and OpenSSL (system)
@@ -111,8 +111,8 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 # Ubuntu package repositories. luarocks is used to install the luaunit testing
 # framework for Lua, and CPAN installs Test::Deep and Data::Compare for Perl
 # test-oriented evaluation.
-RUN apt-get install -y r-base lua5.2 luarocks ruby-full \
-    && luarocks install luaunit \
+RUN apt-get install -y r-base lua5.2 liblua5.2-dev luarocks ruby-full \
+    && luarocks --lua-version=5.2 install luaunit \
     && PERL_MM_USE_DEFAULT=1 cpan Test::Deep Data::Compare
 
 # ---------------------------------------------------------------------------
