@@ -79,8 +79,7 @@ async def run_python(args: CodeRunArgs) -> CodeRunResult:
                                   f'python {f.name}',
                                   tmp_dir,
                                   get_python_rt_env('sandbox-runtime'),
-                                  args,
-                                  set_uid=config.sandbox.set_uid)
+                                  args)
 
 
 async def run_pytest(args: CodeRunArgs) -> CodeRunResult:

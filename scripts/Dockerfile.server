@@ -1,9 +1,8 @@
-FROM vemlp-cn-beijing.cr.volces.com/preset-images/code-sandbox:base-20250609
+FROM volcengine/sandbox-fusion:base-20250609
 
 COPY ./runtime/go ./runtime/go
 # download and cache go deps
 RUN cd ./runtime/go \
-    && go env -w GOPROXY="https://goproxy.cn|direct" \
     && go build
 
 COPY ./runtime/node /root/sandbox/runtime/node
@@ -20,9 +19,6 @@ RUN cd /root/sandbox/runtime/lean && lake build
 
 COPY ./runtime/python ./runtime/python
 RUN cd ./runtime/python && bash install-python-runtime.sh
-# fix pyqt error, see https://github.com/NVlabs/instant-ngp/discussions/300
-ENV QT_QPA_PLATFORM=offscreen
-ENV OMP_NUM_THREADS=2
 
 COPY ./ /root/sandbox
 WORKDIR /root/sandbox

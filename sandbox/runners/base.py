@@ -22,14 +22,11 @@ from typing import Dict, List, Optional
 
 import psutil
 import structlog
-import platform
-import resource
 
 from sandbox.configs.run_config import RunConfig
 from sandbox.runners.isolation import tmp_cgroup, tmp_netns, tmp_overlayfs
 from sandbox.runners.types import CodeRunArgs, CodeRunResult, CommandRunResult, CommandRunStatus
-from sandbox.utils.common import set_permissions_recursively
-from sandbox.utils.execution import cleanup_process, ensure_bash_integrity, get_output_non_blocking, kill_process_tree
+from sandbox.utils.execution import get_output_non_blocking, kill_process_tree
 
 logger = structlog.stdlib.get_logger()
 config = RunConfig.get_instance_sync()
@@ -94,10 +91,6 @@ async def run_command_bare(command: str | List[str],
             if psutil.pid_exists(p.pid):
                 kill_process_tree(p.pid)
                 logger.info(f'process killed: {p.pid}')
-            if config.sandbox.cleanup_process:
-                cleanup_process()
-            if config.sandbox.restore_bash:
-                ensure_bash_integrity()
 
         return CommandRunResult(status=CommandRunStatus.Finished,
                                 execution_time=execution_time,
@@ -116,50 +109,7 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
     compile_res = None
     run_res = None
 
-    if config.sandbox.isolation == 'none':
-        preexec_steps = []
-        if kwargs.get('set_uid'):
-            set_permissions_recursively(cwd, 0o777)
-            preexec_steps.append(lambda: os.setuid(kwargs.get('set_uid')))
-        
-        # Apply memory limit using resource module
-        if args.memory_limit_MB > 0:
-            def memory_limit_preexec():
-                _, hard_memory_limit_AS = resource.getrlimit(resource.RLIMIT_AS)
-                _, hard_memory_limit_DATA = resource.getrlimit(resource.RLIMIT_DATA)
-                soft_memory_limit = args.memory_limit_MB * 1024 * 1024
-                resource.setrlimit(resource.RLIMIT_AS, (soft_memory_limit, hard_memory_limit_AS))
-                resource.setrlimit(resource.RLIMIT_DATA, (soft_memory_limit, hard_memory_limit_DATA))
-                if platform.uname().system != "Darwin":
-                    _, hard_memory_limit_STACK = resource.getrlimit(resource.RLIMIT_STACK)
-                    resource.setrlimit(resource.RLIMIT_STACK, (soft_memory_limit, hard_memory_limit_STACK))
-            preexec_steps.insert(0, memory_limit_preexec)
-        preexec_fn = lambda: [step() for step in preexec_steps] if preexec_steps else None
-        
-        if compile_command is not None:
-            compile_res = await run_command_bare(compile_command,
-                                                 args.compile_timeout,
-                                                 None,
-                                                 cwd,
-                                                 extra_env,
-                                                 preexec_fn=preexec_fn)
-        if compile_res is None or (compile_res.status == CommandRunStatus.Finished and compile_res.return_code == 0):
-            run_res = await run_command_bare(run_command,
-                                             args.run_timeout,
-                                             args.stdin,
-                                             cwd,
-                                             extra_env,
-                                             preexec_fn=preexec_fn)
-        for filename in args.fetch_files:
-            fp = os.path.abspath(os.path.join(cwd, filename))
-            if os.path.isfile(fp):
-                with open(fp, 'rb') as f:
-                    content = f.read()
-                base64_content = base64.b64encode(content).decode('utf-8')
-                files[filename] = base64_content
-        return CodeRunResult(compile_result=compile_res, run_result=run_res, files=files)
-
-    elif config.sandbox.isolation == 'lite':
+    if config.sandbox.isolation == 'lite':
         async with tmp_overlayfs() as root, tmp_cgroup(mem_limit='4G', cpu_limit=1) as cgroups, tmp_netns(
                 kwargs.get('netns_no_bridge', False)) as netns:
             prefix = []
@@ -186,6 +136,36 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
                     base64_content = base64.b64encode(content).decode('utf-8')
                     files[filename] = base64_content
             return CodeRunResult(compile_result=compile_res, run_result=run_res, files=files)
+
+    elif config.sandbox.isolation == 'full':
+        docker_image = config.sandbox.docker_image
+        mem_limit = f'{args.memory_limit_MB}m' if args.memory_limit_MB > 0 else '4g'
+        docker_prefix = [
+            'docker', 'run', '--rm',
+            '--memory', mem_limit,
+            '--cpus', '1',
+            '--network', 'none',
+            '--pids-limit', '256',
+            '-v', f'{cwd}:{cwd}',
+            '-w', cwd,
+            docker_image,
+        ]
+
+        if compile_command is not None:
+            compile_res = await run_command_bare(docker_prefix + ['bash', '-c', compile_command],
+                                                 args.compile_timeout, None, cwd, extra_env, True)
+        if compile_res is None or (compile_res.status == CommandRunStatus.Finished and compile_res.return_code == 0):
+            run_res = await run_command_bare(docker_prefix + ['bash', '-c', run_command],
+                                             args.run_timeout, args.stdin, cwd, extra_env, True)
+
+        for filename in args.fetch_files:
+            fp = os.path.abspath(os.path.join(cwd, filename))
+            if os.path.isfile(fp):
+                with open(fp, 'rb') as f:
+                    content = f.read()
+                base64_content = base64.b64encode(content).decode('utf-8')
+                files[filename] = base64_content
+        return CodeRunResult(compile_result=compile_res, run_result=run_res, files=files)
 
 
 def restore_files(dir: str, files: Dict[str, Optional[str]]):

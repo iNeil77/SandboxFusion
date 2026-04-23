@@ -23,14 +23,11 @@ from pydantic import BaseModel, Field
 
 from sandbox.runners import (
     CODE_RUNNERS,
-    CellRunResult,
     CodeRunArgs,
     CodeRunResult,
     CommandRunResult,
     CommandRunStatus,
     Language,
-    RunJupyterRequest,
-    run_jupyter,
 )
 
 sandbox_router = APIRouter()
@@ -62,15 +59,6 @@ class RunCodeResponse(BaseModel):
     message: str
     compile_result: Optional[CommandRunResult] = None
     run_result: Optional[CommandRunResult] = None
-    executor_pod_name: Optional[str] = None
-    files: Dict[str, str] = {}
-
-
-class RunJupyterResponse(BaseModel):
-    status: RunStatus
-    message: str
-    driver: Optional[CommandRunResult] = None
-    cells: List[CellRunResult] = []
     executor_pod_name: Optional[str] = None
     files: Dict[str, str] = {}
 
@@ -125,26 +113,3 @@ async def run_code(request: RunCodeRequest):
     return resp
 
 
-@sandbox_router.post("/run_jupyter", name='Run Code in Jupyter', response_model=RunJupyterResponse, tags=['sandbox'])
-async def run_jupyter_handler(request: RunJupyterRequest):
-    resp = RunJupyterResponse(status=RunStatus.Success, message='', executor_pod_name=os.environ.get('MY_POD_NAME'))
-    code_repr = "\n".join(request.cells)[:100]
-    try:
-        logger.debug(
-            f'start processing jupyter request with code ```\n{code_repr}\n``` and files {list(request.files.keys())}...'
-        )
-        result = await run_jupyter(request)
-        resp.driver = result.driver
-        if result.status != CommandRunStatus.Finished:
-            resp.status = RunStatus.Failed
-        else:
-            resp.status = RunStatus.Success
-            resp.cells = result.cells
-            resp.files = result.files
-    except Exception as e:
-        message = f'exception on running jupyter {code_repr}: {e} {traceback.print_tb(e.__traceback__)}'
-        logger.warning(message)
-        resp.message = message
-        resp.status = RunStatus.SandboxError
-
-    return resp

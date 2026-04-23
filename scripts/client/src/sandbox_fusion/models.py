@@ -54,67 +54,21 @@ class CodeRunResult(BaseModel):
     files: Dict[str, str] = {}
 
 
-class RunJupyterRequest(BaseModel):
-    cells: List[str] = Field(
-        ...,
-        examples=[[
-            'a = 123', 'a', 'print(a)', 'import sys; sys.stderr.write("stderr message")',
-            'raise RuntimeError("error message")'
-        ]],
-        description='list of code blocks to run in jupyter notebook')
-    cell_timeout: float = Field(0, description='max run time for each of the cells')
-    total_timeout: float = Field(45, description='max run time for all the cells')
-    kernel: Literal['python3'] = 'python3'
-    files: Dict[str, str] = Field({}, description='a dict from file path to base64 encoded file content')
-    fetch_files: List[str] = Field([], description='a list of file paths to fetch after code execution')
-
-
-class CellRunResult(BaseModel):
-    stdout: str
-    stderr: str
-    display: List[Dict[str, Any]]
-    error: List[Dict[str, Any]]
-
-
-class RunJupyterResult(BaseModel):
-    status: CommandRunStatus
-    driver: CommandRunResult
-    cells: List[CellRunResult] = []
-    files: Dict[str, str] = {}
-
-
 Language = Literal['python', 'cpp', 'nodejs', 'go', 'go_test', 'java', 'php', 'csharp', 'bash', 'typescript', 'sql',
-                   'rust', 'cuda', 'lua', 'R', 'perl', 'D_ut', 'ruby', 'scala', 'julia', 'pytest', 'junit',
-                   'kotlin_script', 'jest', 'verilog', 'python_gpu', 'lean', 'swift', 'racket']
-
-
-class CommandRunStatus(str, Enum):
-    Finished = 'Finished'
-    TimeLimitExceeded = 'TimeLimitExceeded'
-    # ignore this in logic as this state cause run_code to throw
-    Error = 'Error'
-
-
-class CommandRunResult(BaseModel):
-    status: CommandRunStatus
-    execution_time: Optional[float] = None
-    return_code: Optional[int] = None
-    stdout: Optional[str] = None
-    stderr: Optional[str] = None
+                   'rust', 'lua', 'R', 'perl', 'D_ut', 'ruby', 'scala', 'julia', 'pytest', 'junit',
+                   'kotlin_script', 'jest', 'verilog', 'lean', 'swift', 'racket']
 
 
 class RunStatus(str, Enum):
-    # all command finished successfully
     Success = 'Success'
-    # one of the process has non-zero return code
     Failed = 'Failed'
-    # error on sandbox side, ignore this in logic as this state cause run_code to throw
     SandboxError = 'SandboxError'
 
 
 class RunCodeRequest(BaseModel):
     compile_timeout: float = Field(10, description='compile timeout for compiled languages')
     run_timeout: float = Field(10, description='code run timeout')
+    memory_limit_MB: int = Field(-1, description='maximum memory allowed in megabytes')
     code: str = Field(..., examples=['print("hello")'], description='the code to run')
     stdin: Optional[str] = Field(None, examples=[''], description='optional string to pass into stdin')
     language: Language = Field(..., examples=['python'], description='the language or execution mode to run the code')
@@ -131,15 +85,6 @@ class RunCodeResponse(BaseModel):
     files: Dict[str, str] = {}
 
 
-class RunJupyterResponse(BaseModel):
-    status: RunStatus
-    message: str
-    driver: Optional[CommandRunResult] = None
-    cells: List[CellRunResult] = []
-    executor_pod_name: Optional[str] = None
-    files: Dict[str, str] = {}
-
-
 class SummaryMapping(BaseModel):
     Success: str = RunStatus.Success
     Failed: str = RunStatus.Failed
@@ -149,40 +94,22 @@ class SummaryMapping(BaseModel):
     RunTimeout: Optional[str] = None
 
 
-# Datasets related
-
-
-class Prompt(BaseModel):
-    id: Union[int, str]
-    prompt: str
-    labels: Dict[str, Any] = {}
-
-
-class TestConfig(BaseModel):
-    '''
-    custom_extract_logic: a piece of python code that calls `submit_code_blocks(cbs)` to extract custom code
-                          cbs: List[CodeBlock], CodeBlock(priority=40, code='xxx', language='xxx')
-                          priority: fenced = 30, incomplete fenced = 20, heuristic = 10
-    '''
-    __test__ = False
-    dataset_type: Optional[str] = Field(
-        None,
-        examples=[None],
-        description='the dataset class used to process, only works when the dataset id is not registered.')
-    language: Optional[Language] = None
-    locale: Optional[str] = None
-    is_fewshot: Optional[bool] = None
-    compile_timeout: Optional[float] = None
-    run_timeout: Optional[float] = None
-    custom_extract_logic: Optional[str] = None
-    provided_data: Optional[Union[List[Dict[str, Any]], Dict[str, Any]]] = None
-    extra: Dict[str, Any] = {}
+# Eval related
 
 
 class GeneralStdioTest(BaseModel):
-    # stdin / stdout for the standard streams, other names for files
     input: Dict[str, str]
     output: Dict[str, str]
+
+
+class TestConfig(BaseModel):
+    __test__ = False
+    language: Optional[Language] = None
+    locale: Optional[str] = None
+    compile_timeout: Optional[float] = None
+    run_timeout: Optional[float] = None
+    custom_extract_logic: Optional[str] = None
+    extra: Dict[str, Any] = {}
 
 
 class EvalTestCase(BaseModel):
@@ -202,36 +129,8 @@ class EvalResult(BaseModel):
     extra: Optional[Dict] = None
 
 
-class GetPromptsRequest(BaseModel):
-    dataset: str
-    config: TestConfig
-    offset: int = 0
-    limit: int = 1000000
-
-
-class GetPromptByIdRequest(BaseModel):
-    dataset: str
-    config: TestConfig
-    id: Union[int, str]
-
-
 class SubmitRequest(BaseModel):
-    dataset: str
     id: Union[int, str]
     completion: str
     config: TestConfig
-
-
-class GetMetricsRequest(BaseModel):
-    dataset: str
-    config: TestConfig
-    results: List[EvalResult]
-
-
-class GetMetricsFunctionRequest(BaseModel):
-    dataset: str
-    config: TestConfig
-
-
-class GetMetricsFunctionResult(BaseModel):
-    function: Optional[str]
+    test_cases: List[GeneralStdioTest]

@@ -13,19 +13,13 @@
 # limitations under the License.
 
 import asyncio
-import hashlib
 import os
-import shutil
-import sys
 from functools import cache, wraps
 from typing import Any, Callable, Coroutine, TypeVar
 
 import psutil
 import structlog
 
-from sandbox.configs.run_config import RunConfig
-
-config = RunConfig.get_instance_sync()
 logger = structlog.stdlib.get_logger()
 
 
@@ -58,74 +52,9 @@ def kill_process_tree(pid):
         logger.warn(f'error on killing process tree: {e}')
 
 
-current_pid = os.getpid()
-root_pid = current_pid
-while True:
-    next_pid = psutil.Process(root_pid).ppid()
-    if next_pid <= 1:
-        break
-    root_pid = next_pid
-
-
-def cleanup_process():
-    try:
-        child_pids = [p.pid for p in psutil.Process(root_pid).children(recursive=True)]
-        for process in psutil.process_iter(['pid', 'name']):
-            pid = process.pid
-            if pid < current_pid:
-                continue
-            if process.terminal() is not None:
-                continue
-            if pid in child_pids:
-                continue
-            cmd = ' '.join(process.cmdline())
-            if 'bincore/VBCSCompiler.dll' in cmd:
-                continue
-            blacklist = ['node', 'python', 'go', 'npm', 'bash', 'dotnet', 'g++', 'test', 'flask', 'sleep']
-            if not any([w in cmd.lower() for w in blacklist]):
-                continue
-            try:
-                process.kill()
-                logger.info(f'process killed: [{pid}] {cmd}')
-            except psutil.NoSuchProcess:
-                pass
-    except Exception as e:
-        logger.warn(f'error on cleaning up processes: {e}')
-
-
-def file_md5(fn: str) -> str:
-    with open(fn, "rb") as file:
-        hash_md5 = hashlib.md5()
-        for chunk in iter(lambda: file.read(4096), b""):
-            hash_md5.update(chunk)
-        file_md5 = hash_md5.hexdigest()
-    return file_md5
-
-
-def ensure_bash_integrity():
-    internal_bash = os.path.abspath(os.path.join(__file__, '../../runtime/bin/bash'))
-    bash_path = '/bin/bash'
-    original_md5 = '23c415748ff840b296d0b93f98649dec'
-    try:
-        if os.path.exists(bash_path) and file_md5(bash_path) == original_md5:
-            return
-        logger.warning(f'/bin/bash modified, trying to restore...')
-        if not os.path.exists(internal_bash):
-            logger.error(f'internal bash not found!')
-            sys.exit(1)
-        if file_md5(internal_bash) != original_md5:
-            logger.error(f'internal bash modified!')
-            sys.exit(1)
-        shutil.copy2(internal_bash, bash_path)
-    except Exception as e:
-        logger.error(f"failed to recover the integrity of bash: {e}")
-        sys.exit(1)
-
-
 @cache
 def get_tmp_dir() -> str:
     TMP_DIR = '/tmp'
-    # TMP_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '../tmp'))
     os.makedirs(TMP_DIR, exist_ok=True)
     logger.info(f'tmp dir: {TMP_DIR}')
     return TMP_DIR

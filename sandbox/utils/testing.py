@@ -26,7 +26,7 @@ from sandbox.utils.common import truncate_str
 from sandbox.utils.execution import max_concurrency
 from sandbox.utils.sandbox_client import RunCodeRequest, run_code_in_sandbox, run_code_in_sandbox_w_retry
 
-sandbox_config = RunConfig.get_instance_sync()
+eval_config = RunConfig.get_instance_sync()
 logger = structlog.stdlib.get_logger()
 
 
@@ -113,9 +113,9 @@ async def check_stdio_test_cases_parallel(code: str,
     tasks: List[asyncio.Task[EvalTestCase]] = []
 
     check_stdio_test_case_limited = check_stdio_test_case
-    if sandbox_config.dataset.max_runner_concurrency > 0:
+    if eval_config.eval.max_runner_concurrency > 0:
         check_stdio_test_case_limited = max_concurrency(
-            sandbox_config.dataset.max_runner_concurrency)(check_stdio_test_case)
+            eval_config.eval.max_runner_concurrency)(check_stdio_test_case)
 
     for case in cases:
         task = asyncio.create_task(check_stdio_test_case_limited(code, case, config, lower_cmp))

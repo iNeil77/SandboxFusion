@@ -12,17 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from abc import ABC, abstractmethod
-from string import Template
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-from sandbox.configs.run_config import RunConfig
 from sandbox.runners.types import CommandRunResult, CommandRunStatus, Language  # nopycln: import
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus  # nopycln: import
 
-server_config = RunConfig.get_instance_sync()
 
 # OJ related
 
@@ -38,6 +34,12 @@ class Prompt(BaseModel):
     labels: Dict[str, Any] = {}
 
 
+class GeneralStdioTest(BaseModel):
+    # stdin / stdout for the standard streams, other names for files
+    input: Dict[str, str]
+    output: Dict[str, str]
+
+
 class TestConfig(BaseModel):
     '''
     custom_extract_logic: a piece of python code that calls `submit_code_blocks(cbs)` to extract custom code
@@ -45,24 +47,12 @@ class TestConfig(BaseModel):
                           priority: fenced = 30, incomplete fenced = 20, heuristic = 10
     '''
     __test__ = False
-    dataset_type: Optional[str] = Field(
-        None,
-        examples=[None],
-        description='the dataset class used to process, only works when the dataset id is not registered.')
     language: Optional[Language] = None
     locale: Optional[str] = None
-    is_fewshot: Optional[bool] = None
     compile_timeout: Optional[float] = None
     run_timeout: Optional[float] = None
     custom_extract_logic: Optional[str] = None
-    provided_data: Optional[List[Dict[str, Any]] | Dict[str, Any]] = None
     extra: Dict[str, Any] = {}
-
-
-class GeneralStdioTest(BaseModel):
-    # stdin / stdout for the standard streams, other names for files
-    input: Dict[str, str]
-    output: Dict[str, str]
 
 
 class EvalTestCase(BaseModel):
@@ -82,75 +72,8 @@ class EvalResult(BaseModel):
     extra: Optional[Dict] = None
 
 
-class GetPromptsRequest(BaseModel):
-    dataset: str
-    config: TestConfig
-    offset: int = 0
-    limit: int = 1000000
-
-
-class GetPromptByIdRequest(BaseModel):
-    dataset: str
-    config: TestConfig
-    id: int | str
-
-
 class SubmitRequest(BaseModel):
-    dataset: str
     id: int | str
     completion: str
     config: TestConfig
-
-
-class GetMetricsRequest(BaseModel):
-    dataset: str
-    config: TestConfig
-    results: List[EvalResult]
-
-
-class GetMetricsFunctionRequest(BaseModel):
-    dataset: str
-    config: TestConfig
-
-
-class GetMetricsFunctionResult(BaseModel):
-    function: Optional[str]
-
-
-class CodingDataset(ABC):
-
-    @classmethod
-    def get_table_name(cls, dataset_id: str) -> str:
-        for registry in server_config.dataset.registry:
-            if registry.class_name != cls.__name__:
-                continue
-            if dataset_id in registry.dataset_tables:
-                return registry.dataset_tables[dataset_id]
-            else:
-                return Template(server_config.dataset.default_dataset_table).substitute(dataset_id=dataset_id)
-        raise RuntimeError(f'class {cls.__name__} not in config registry!')
-
-    @classmethod
-    async def get_ids(cls, request: GetPromptsRequest) -> List[int | str]:
-        prompts = await cls.get_prompts(request)
-        return [p.id for p in prompts]
-
-    @classmethod
-    @abstractmethod
-    async def get_num_problems(self, dataset_id: str) -> int:
-        ...
-
-    @classmethod
-    @abstractmethod
-    async def get_prompts(self, request: GetPromptsRequest) -> List[Prompt]:
-        ...
-
-    @classmethod
-    @abstractmethod
-    async def get_prompt_by_id(self, request: GetPromptByIdRequest) -> Prompt:
-        ...
-
-    @classmethod
-    @abstractmethod
-    async def evaluate_single(self, request: SubmitRequest) -> EvalResult:
-        ...
+    test_cases: List[GeneralStdioTest]

@@ -14,15 +14,14 @@
 
 import aiohttp
 import logging
-from typing import List, Optional
+from typing import Optional
 
 from .common import trim_slash
 from .client import configurable_retry
 from . import config
 
 from .models import RunCodeRequest, RunCodeResponse, EvalResult, \
-    GetPromptByIdRequest, GetPromptsRequest, Prompt, SubmitRequest, \
-    RunJupyterRequest, RunJupyterResponse, RunStatus
+    SubmitRequest, RunStatus
 
 logger = logging.getLogger(__name__)
 
@@ -39,54 +38,13 @@ async def run_code(request: RunCodeRequest,
             async with session.post(f'{trim_slash(endpoint or config.SANDBOX_ENDPOINT)}/run_code',
                                     json=request.dict()) as result:
                 if result.status != 200:
-                    raise Exception(f'Faas api responded with code {result.status}: {await result.text()}')
+                    raise Exception(f'API responded with code {result.status}: {await result.text()}')
                 resp = RunCodeResponse(**(await result.json()))
                 if resp.status == RunStatus.SandboxError:
                     raise Exception(f'Sandbox responded with error: {resp.message}')
                 return resp
 
     return await _run_code(request)
-
-
-async def run_jupyter(request: RunJupyterRequest,
-                      endpoint: str = '',
-                      max_attempts: int = 3,
-                      client_timeout: Optional[float] = None) -> RunJupyterResponse:
-
-    @configurable_retry(max_attempts)
-    async def _run_jupyter(request: RunJupyterRequest) -> RunJupyterResponse:
-        timeout = aiohttp.ClientTimeout(total=client_timeout) if client_timeout else None
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(f'{trim_slash(endpoint or config.SANDBOX_ENDPOINT)}/run_jupyter',
-                                    json=request.dict()) as result:
-                if result.status != 200:
-                    raise Exception(f'Faas api responded with code {result.status}: {await result.text()}')
-                resp = RunJupyterResponse(**(await result.json()))
-                if resp.status == RunStatus.SandboxError:
-                    raise Exception(f'Sandbox responded with error: {resp.message}')
-                return resp
-
-    return await _run_jupyter(request)
-
-
-async def get_prompts(request: GetPromptsRequest, endpoint: str = '') -> List[Prompt]:
-    async with aiohttp.ClientSession() as session:
-        async with session.post(f'{trim_slash(endpoint or config.DATASET_ENDPOINT)}/get_prompts',
-                                json=request.dict()) as result:
-            if result.status != 200:
-                raise Exception(f'Faas api responded with code {result.status}: {await result.text()}')
-            resp = [Prompt(**r) for r in await result.json()]
-            return resp
-
-
-async def get_prompt_by_id(request: GetPromptByIdRequest, endpoint: str = '') -> Prompt:
-    async with aiohttp.ClientSession() as session:
-        async with session.post(f'{trim_slash(endpoint or config.DATASET_ENDPOINT)}/get_prompt_by_id',
-                                json=request.dict()) as result:
-            if result.status != 200:
-                raise Exception(f'Faas api responded with code {result.status}: {await result.text()}')
-            resp = Prompt(**(await result.json()))
-            return resp
 
 
 async def submit(request: SubmitRequest,
@@ -98,10 +56,10 @@ async def submit(request: SubmitRequest,
     async def _submit(request: SubmitRequest) -> EvalResult:
         timeout = aiohttp.ClientTimeout(total=client_timeout) if client_timeout else None
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(f'{trim_slash(endpoint or config.DATASET_ENDPOINT)}/submit',
+            async with session.post(f'{trim_slash(endpoint or config.SANDBOX_ENDPOINT)}/submit',
                                     json=request.dict()) as result:
                 if result.status != 200:
-                    raise Exception(f'Faas api responded with code {result.status}: {await result.text()}')
+                    raise Exception(f'API responded with code {result.status}: {await result.text()}')
                 resp = EvalResult(**(await result.json()))
                 return resp
 

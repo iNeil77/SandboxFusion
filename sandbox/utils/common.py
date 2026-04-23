@@ -84,15 +84,6 @@ def find_conda_root():
         return f"An unexpected error occurred: {e}"
 
 
-def set_permissions_recursively(path, mode):
-    for root, dirs, files in os.walk(path):
-        for dir_name in dirs:
-            os.chmod(os.path.join(root, dir_name), mode)
-        for file_name in files:
-            os.chmod(os.path.join(root, file_name), mode)
-    os.chmod(path, mode)
-
-
 def ensure_php_tag_in_string(php_code: str) -> str:
     """
     Ensure that a string containing PHP code starts with <?php tag.

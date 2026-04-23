@@ -1,9 +1,7 @@
-FROM vemlp-cn-beijing.cr.volces.com/preset-images/mirror:ubuntu-focal-20231211
+FROM ubuntu:focal-20231211
 
-COPY ./scripts/tuna-apt.sh ./scripts/tuna-apt.sh
 ENV DEBIAN_FRONTEND=noninteractive
-RUN bash ./scripts/tuna-apt.sh 20.04 \
-    && apt-get update && apt-get install -y curl npm git nano wget vim unzip sudo cgroup-tools iproute2 iptables \
+RUN apt-get update && apt-get install -y curl npm git nano wget vim unzip sudo cgroup-tools iproute2 iptables \
     # iverilog build deps
     autoconf gperf flex bison \
     # bash scripting utils
@@ -14,8 +12,6 @@ RUN bash ./scripts/tuna-apt.sh 20.04 \
 COPY ./scripts/install-miniconda.sh ./scripts/install-miniconda.sh
 RUN bash ./scripts/install-miniconda.sh 3.11
 ENV PATH="/root/miniconda3/bin:${PATH}"
-RUN wget https://veml.tos-cn-beijing.volces.com/condarc -O ~/.condarc && \
-    pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
 RUN curl -sSL https://install.python-poetry.org | POETRY_VERSION=1.7.0 python3 -
 ENV PATH=/root/.local/bin:$PATH
 
@@ -34,7 +30,6 @@ RUN npm install -g typescript@5.3.3 tsx@4.7.1
 
 # gcc 9
 RUN apt-get update && apt-get install -y build-essential g++ libboost-all-dev
-
 RUN curl -o /workspace/download/openssl.tar.gz -SL https://www.openssl.org/source/old/3.0/openssl-3.0.11.tar.gz \
     && tar -zxf /workspace/download/openssl.tar.gz && cd openssl-3.0.11 && ./Configure && make && make install \
     && rm /workspace/download/openssl.tar.gz && cd .. && rm -r openssl-3.0.11
@@ -100,7 +95,7 @@ RUN curl -o /workspace/download/swift.tar.gz -SL https://download.swift.org/swif
     && tar zxf swift.tar.gz \
     && mkdir /usr/local/swift \
     && mv swift-5.10.1-RELEASE-ubuntu20.04/usr/* /usr/local/swift \
-    && rm -f /workspace/download/swift.tar.gz            
+    && rm -f /workspace/download/swift.tar.gz
 ENV PATH=/usr/local/swift/bin:$PATH
 
 SHELL ["sh", "-lc"]

@@ -14,45 +14,32 @@
 
 import os
 import traceback
-from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from sandbox.database import get_databases
-from sandbox.server.online_judge_api import oj_router
 from sandbox.server.sandbox_api import sandbox_router
+from sandbox.server.submit_api import submit_router
 from sandbox.utils.logging import configure_logging
 
 configure_logging()
 logger = structlog.stdlib.get_logger()
 
+app = FastAPI()
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    datalake, sqlite = await get_databases()
-    logger.info(f'database initialized')
-    yield
-    await datalake.disconnect()
-    await sqlite.disconnect()
+playground_dir = os.path.abspath(os.path.join(__file__, '../../pages'))
+if os.path.isdir(playground_dir):
+    app.mount('/playground', StaticFiles(directory=playground_dir, html=True), name='playground')
 
-
-app = FastAPI(lifespan=lifespan)
-app.mount('/playground',
-          StaticFiles(directory=os.path.abspath(os.path.join(__file__, '../../pages')), html=True),
-          name='playground')
-
-app = FastAPI(lifespan=lifespan)
-app.mount('/SandboxFusion',
-          StaticFiles(directory=os.path.abspath(os.path.join(__file__, '../../../docs/build')), html=True),
-          name='doc-site')
+docs_dir = os.path.abspath(os.path.join(__file__, '../../../docs/build'))
+if os.path.isdir(docs_dir):
+    app.mount('/SandboxFusion', StaticFiles(directory=docs_dir, html=True), name='doc-site')
 
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    # redirect to current path + playground
     return '''
 <!DOCTYPE html>
 <html lang="en">
@@ -85,7 +72,7 @@ async def base_exception_handler(request: Request, exc: Exception):
 
 
 app.include_router(sandbox_router, tags=['sandbox'])
-app.include_router(oj_router, tags=['datasets'])
+app.include_router(submit_router, tags=['eval'])
 
 
 @app.get("/v1/ping")
