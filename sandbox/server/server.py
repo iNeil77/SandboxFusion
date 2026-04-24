@@ -37,6 +37,15 @@ logger = structlog.stdlib.get_logger()
 
 app = FastAPI()
 
+
+@app.on_event("startup")
+async def _sweep_orphaned_sandboxes():
+    """Clean orphaned sandbox resources from prior server crashes on startup."""
+    from sandbox.runners.isolation import cleanup_orphaned_sandboxes
+    cleaned = cleanup_orphaned_sandboxes()
+    if cleaned:
+        logger.warning('startup sweep cleaned orphaned sandboxes', count=cleaned)
+
 docs_dir = os.path.abspath(os.path.join(__file__, '../../../docs/build'))
 if os.path.isdir(docs_dir):
     app.mount('/SandboxFusion', StaticFiles(directory=docs_dir, html=True), name='doc-site')

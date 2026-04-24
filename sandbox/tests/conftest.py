@@ -30,19 +30,31 @@ def pytest_configure(config):
     ``sandbox._called_from_test = True`` so that runtime code can adapt
     its behaviour for testing, then initialises structured logging via
     :func:`sandbox.utils.logging.configure_logging`.
+
+    Also runs a startup sweep to clean orphaned sandbox resources
+    (overlays, cgroups, network namespaces) left behind by prior
+    crashes or SIGKILL'd test runs.
     """
     import sandbox
     sandbox._called_from_test = True
     from sandbox.utils.logging import configure_logging
     configure_logging()
+    from sandbox.runners.isolation import cleanup_orphaned_sandboxes
+    cleanup_orphaned_sandboxes()
 
 
 def pytest_unconfigure(config):
-    """Remove the test-mode flag after all tests have finished.
+    """Clean up after all tests have finished.
 
-    Called by pytest during shutdown.  Deletes the
-    ``sandbox._called_from_test`` attribute so that the package state is
-    clean if it continues to be used in the same process.
+    Called by pytest during shutdown.  Runs a final sweep for any sandbox
+    resources leaked during this test session, then removes the test-mode
+    flag.
     """
+    try:
+        from sandbox.runners.isolation import cleanup_orphaned_sandboxes
+        cleanup_orphaned_sandboxes()
+    except Exception:
+        pass
     import sandbox
-    del sandbox._called_from_test
+    if hasattr(sandbox, '_called_from_test'):
+        del sandbox._called_from_test

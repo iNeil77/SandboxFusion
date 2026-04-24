@@ -32,9 +32,12 @@ removal) when exiting, even on error.
 """
 
 import asyncio
+import glob
 import os
+import signal
 import shutil
 import stat
+import subprocess as _subprocess
 import sys
 import threading
 import time
@@ -48,6 +51,171 @@ import structlog
 from sandbox.utils.common import random_cgroup_name
 
 logger = structlog.stdlib.get_logger()
+
+# ---------------------------------------------------------------------------
+# Orphan tracking and cleanup
+# ---------------------------------------------------------------------------
+# Every overlay directory created by this process is tracked here so that
+# signal handlers can clean up on SIGTERM/SIGINT without needing the async
+# event loop.
+_live_overlay_dirs: set[str] = set()
+_live_overlay_lock = threading.Lock()
+
+
+def _sync_unmount_overlay(base_dir: str) -> None:
+    """Synchronously unmount all sandbox mounts under *base_dir* and remove it.
+
+    Safe to call from signal handlers (uses only subprocess.run, no asyncio).
+    """
+    merged = f'{base_dir}/merged'
+    tmpfs = f'{base_dir}/tmpfs'
+    _subprocess.run(
+        ['sudo', 'bash', '-c',
+         f'umount -Rl {merged}/dev 2>/dev/null;'
+         f'umount -l {merged}/sys 2>/dev/null;'
+         f'umount -l {merged}/proc 2>/dev/null;'
+         f'umount -l {merged} 2>/dev/null;'
+         f'umount -l {tmpfs} 2>/dev/null;'
+         f'true'],
+        stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL, timeout=15,
+    )
+    # Sweep anything the batch missed.
+    try:
+        with open('/proc/mounts') as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2 and (parts[1] == base_dir or parts[1].startswith(base_dir + '/')):
+                    _subprocess.run(
+                        ['sudo', 'umount', '-Rl', parts[1]],
+                        stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL, timeout=10,
+                    )
+    except Exception:
+        pass
+    try:
+        shutil.rmtree(base_dir)
+    except Exception:
+        pass
+
+
+def cleanup_orphaned_sandboxes() -> int:
+    """Scan for and clean up orphaned overlay directories from prior crashes.
+
+    Finds all ``/tmp/overlay_*`` directories, unmounts any active mounts
+    underneath them, and removes the directories.  Also cleans orphaned
+    cgroup directories and network namespaces with the ``sandbox_`` prefix.
+
+    Returns the number of orphaned overlays cleaned.
+    """
+    cleaned = 0
+
+    # --- Overlay directories ---
+    for d in glob.glob('/tmp/overlay_*'):
+        if not os.path.isdir(d):
+            continue
+        with _live_overlay_lock:
+            if d in _live_overlay_dirs:
+                continue
+        try:
+            _sync_unmount_overlay(d)
+            cleaned += 1
+            logger.info('cleaned orphaned overlay', path=d)
+        except Exception as e:
+            logger.warning('failed to clean orphaned overlay', path=d, error=str(e))
+
+    # --- Cgroup v2 orphans ---
+    for d in glob.glob('/sys/fs/cgroup/sandbox_*'):
+        name = os.path.basename(d)
+        if name == 'sandbox_init':
+            continue
+        if not os.path.isdir(d):
+            continue
+        try:
+            procs_file = os.path.join(d, 'cgroup.procs')
+            if os.path.isfile(procs_file):
+                with open(procs_file) as f:
+                    pids = [p.strip() for p in f.readlines() if p.strip()]
+                for pid in pids:
+                    _subprocess.run(['sudo', 'kill', '-9', pid],
+                                    stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL, timeout=5)
+            _subprocess.run(['sudo', 'rmdir', d],
+                            stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL, timeout=5)
+            logger.info('cleaned orphaned cgroup v2', path=d)
+        except Exception as e:
+            logger.warning('failed to clean orphaned cgroup v2', path=d, error=str(e))
+
+    # --- Cgroup v1 orphans ---
+    for subsys in ('memory', 'cpu'):
+        cg_base = f'/sys/fs/cgroup/{subsys}'
+        if not os.path.isdir(cg_base):
+            continue
+        for d in glob.glob(f'{cg_base}/sandbox_*'):
+            name = os.path.basename(d)
+            if not os.path.isdir(d):
+                continue
+            try:
+                tasks_file = os.path.join(d, 'tasks')
+                if os.path.isfile(tasks_file):
+                    with open(tasks_file) as f:
+                        pids = [p.strip() for p in f.readlines() if p.strip()]
+                    for pid in pids:
+                        _subprocess.run(['sudo', 'kill', '-9', pid],
+                                        stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL, timeout=5)
+                _subprocess.run(['sudo', 'cgdelete', '-g', f'{subsys}:{name}'],
+                                stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL, timeout=5)
+                logger.info('cleaned orphaned cgroup v1', group=f'{subsys}:{name}')
+            except Exception:
+                pass
+
+    # --- Orphaned network namespaces ---
+    try:
+        result = _subprocess.run(['sudo', 'ip', 'netns', 'list'],
+                                 capture_output=True, text=True, timeout=5)
+        for line in result.stdout.splitlines():
+            ns_name = line.split()[0] if line.strip() else ''
+            if len(ns_name) == 16 and ns_name.isalpha() and ns_name.islower():
+                _subprocess.run(['sudo', 'ip', 'netns', 'delete', ns_name],
+                                stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL, timeout=5)
+                logger.info('cleaned orphaned netns', name=ns_name)
+    except Exception:
+        pass
+
+    # --- Orphaned cgroup wrapper scripts ---
+    for f in glob.glob('/tmp/cg_enter_sandbox_*.sh'):
+        try:
+            os.unlink(f)
+        except OSError:
+            pass
+
+    return cleaned
+
+
+def _signal_cleanup_handler(signum, frame):
+    """Signal handler that cleans up overlays owned by this process, then re-raises."""
+    with _live_overlay_lock:
+        dirs = list(_live_overlay_dirs)
+    for d in dirs:
+        try:
+            _sync_unmount_overlay(d)
+        except Exception:
+            pass
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+
+
+_cleanup_handlers_installed = False
+
+
+def _install_cleanup_handlers():
+    """Install signal handlers for SIGTERM/SIGINT/SIGHUP (idempotent)."""
+    global _cleanup_handlers_installed
+    if _cleanup_handlers_installed:
+        return
+    _cleanup_handlers_installed = True
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        try:
+            signal.signal(sig, _signal_cleanup_handler)
+        except (OSError, ValueError):
+            pass
 
 
 def _detect_cgroup_version() -> int:
@@ -204,6 +372,9 @@ async def tmp_overlayfs():
     upper_dir = f'{tmpfs_dir}/upper'
     work_dir = f'{tmpfs_dir}/work'
 
+    with _live_overlay_lock:
+        _live_overlay_dirs.add(base_dir)
+
     try:
         for sub_dir in [tmpfs_dir, merged_dir]:
             await aiofiles.os.makedirs(sub_dir)
@@ -231,6 +402,8 @@ async def tmp_overlayfs():
             '/etc/resolv.conf', f'{merged_dir}/etc/',
         ], raise_nonzero=False)
     except BaseException:
+        with _live_overlay_lock:
+            _live_overlay_dirs.discard(base_dir)
         await _sweep_remaining_mounts(base_dir)
         try:
             await asyncio.to_thread(shutil.rmtree, base_dir)
@@ -273,6 +446,9 @@ async def tmp_overlayfs():
             await asyncio.to_thread(shutil.rmtree, base_dir)
         except Exception:
             logger.warning('rmtree failed for overlay dir', path=base_dir)
+
+        with _live_overlay_lock:
+            _live_overlay_dirs.discard(base_dir)
 
 
 async def _wait_pid_exit(pid: str, label: str):
@@ -527,6 +703,15 @@ async def tmp_netns(no_bridge: bool = False):
         except Exception:
             logger.warning('netns cleanup failed', netns=net_ns_name)
         return_subnet_ip_rfc_2322(subnet_ip)
+
+
+# ---------------------------------------------------------------------------
+# Module startup: install signal handlers and sweep orphans from prior crashes.
+# ---------------------------------------------------------------------------
+_install_cleanup_handlers()
+_orphans_cleaned = cleanup_orphaned_sandboxes()
+if _orphans_cleaned:
+    logger.warning('startup sweep cleaned orphaned sandboxes', count=_orphans_cleaned)
 
 
 async def main():
