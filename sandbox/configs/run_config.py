@@ -74,12 +74,17 @@ class RunConfig(BaseModel):
             Default CPU core limit for each sandbox execution.
             In lite mode this sets the CFS quota; in full mode it maps
             to ``docker run --cpus``.
+        docker_startup_overhead : float
+            Extra seconds added to compile and run timeouts in full
+            (Docker) isolation mode to account for container startup
+            latency.  Has no effect in lite mode.
         """
         isolation: Literal['lite', 'full']
         max_concurrency: int
         docker_image: str = 'ineil77/sandbox-fusion-server:24042026-2'
         default_memory_limit_mb: int = 8192
         default_cpu_limit: float = 2
+        docker_startup_overhead: float = 10
 
     class EvalConfig(BaseModel):
         """Evaluation runner settings.

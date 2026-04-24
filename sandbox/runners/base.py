@@ -28,6 +28,7 @@ on:
 import asyncio
 import base64
 import os
+import shlex
 import subprocess
 import time
 import traceback
@@ -43,6 +44,11 @@ from sandbox.utils.execution import get_output_non_blocking, kill_process_tree
 
 logger = structlog.stdlib.get_logger()
 config = RunConfig.get_instance_sync()
+
+
+def _shell_quote(s: str) -> str:
+    """Shell-quote a string for safe embedding inside bash -c '...'."""
+    return shlex.quote(s)
 
 
 async def run_command_bare(command: str | List[str],
@@ -155,6 +161,11 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
     (8192 MB) and ``sandbox.default_cpu_limit`` (2 cores) from the YAML
     config, but can be overridden per-request via ``memory_limit_MB``.
 
+    In full mode, ``sandbox.docker_startup_overhead`` seconds (default 10)
+    are added to both compile and run timeouts to account for Docker
+    container startup latency, which is not part of the user's code
+    execution time.
+
     If *compile_command* is provided it is executed first; the run step is
     skipped when compilation fails (non-zero exit or timeout).  After
     execution, any files listed in ``args.fetch_files`` are read from the
@@ -216,6 +227,7 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
         docker_image = config.sandbox.docker_image
         mem_limit = f'{args.memory_limit_MB}m' if args.memory_limit_MB > 0 else f'{config.sandbox.default_memory_limit_mb}m'
         cpu_limit = str(config.sandbox.default_cpu_limit)
+        overhead = config.sandbox.docker_startup_overhead
         docker_prefix = [
             'docker', 'run', '--rm', '-i',
             '--memory', mem_limit,
@@ -231,11 +243,19 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
         docker_prefix.append(docker_image)
 
         if compile_command is not None:
-            compile_res = await run_command_bare(docker_prefix + ['bash', '-c', compile_command],
-                                                 args.compile_timeout, None, cwd, extra_env, True)
+            compile_res = await run_command_bare(
+                docker_prefix + ['bash', '-c', f'timeout {args.compile_timeout} bash -c {_shell_quote(compile_command)}'],
+                args.compile_timeout + overhead, None, cwd, extra_env, True)
+            if compile_res and compile_res.status == CommandRunStatus.Finished and compile_res.return_code == 124:
+                compile_res.status = CommandRunStatus.TimeLimitExceeded
+                compile_res.return_code = None
         if compile_res is None or (compile_res.status == CommandRunStatus.Finished and compile_res.return_code == 0):
-            run_res = await run_command_bare(docker_prefix + ['bash', '-c', run_command],
-                                             args.run_timeout, args.stdin, cwd, extra_env, True)
+            run_res = await run_command_bare(
+                docker_prefix + ['bash', '-c', f'timeout {args.run_timeout} bash -c {_shell_quote(run_command)}'],
+                args.run_timeout + overhead, args.stdin, cwd, extra_env, True)
+            if run_res and run_res.status == CommandRunStatus.Finished and run_res.return_code == 124:
+                run_res.status = CommandRunStatus.TimeLimitExceeded
+                run_res.return_code = None
 
         for filename in args.fetch_files:
             fp = os.path.abspath(os.path.join(cwd, filename))
