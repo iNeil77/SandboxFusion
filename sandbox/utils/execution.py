@@ -105,13 +105,15 @@ def kill_process_tree(pid):
 def get_tmp_dir() -> str:
     """Return the path to the temporary directory, creating it if needed.
 
+    Reads from the ``SANDBOX_TMP_DIR`` environment variable, falling back
+    to ``/tmp``.  In full (Docker) isolation mode, this directory must be
+    visible to the Docker host so that bind-mounted sibling containers
+    can access the temp files.
+
     The result is cached so the directory creation and log message only
     occur on the first call.
-
-    Returns:
-        The path string ``'/tmp'``.
     """
-    TMP_DIR = '/tmp'
+    TMP_DIR = os.environ.get('SANDBOX_TMP_DIR', '/tmp')
     os.makedirs(TMP_DIR, exist_ok=True)
     logger.info(f'tmp dir: {TMP_DIR}')
     return TMP_DIR

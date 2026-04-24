@@ -63,8 +63,10 @@ async def run_command_bare(command: str | List[str],
     This is the lowest-level async execution helper.  It creates a subprocess
     (via ``asyncio.create_subprocess_shell`` or ``asyncio.create_subprocess_exec``
     depending on *use_exec*), optionally writes *stdin* to the process, enforces
-    *timeout* via ``asyncio.wait_for``, and kills the entire process tree on
-    timeout or completion.
+    *timeout* via ``asyncio.wait_for``, and **always** kills the entire process
+    tree after completion (whether the process exited normally, timed out, or
+    failed) to prevent orphaned children.  A 5-second grace period is given
+    for the asyncio child watcher to reap the top-level process.
 
     Args:
         command: Shell command string, or argument list when *use_exec* is True.
@@ -172,6 +174,10 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
       namespace via ``unshare --pid``, and ``chroot``.
     * **full** -- ``docker run --rm`` with ``--memory``, ``--cpus``,
       ``--network none``, ``--pids-limit 1024``, and a bind-mount of *cwd*.
+      Each container gets a unique ``sandbox_<hex>`` name for reliable
+      cleanup.  Commands are shell-quoted via :func:`_shell_quote` and
+      wrapped with ``timeout`` inside the container; exit code 124 is
+      detected and reported as :attr:`CommandRunStatus.TimeLimitExceeded`.
 
     Memory and CPU limits default to ``sandbox.default_memory_limit_mb``
     (8192 MB) and ``sandbox.default_cpu_limit`` (2 cores) from the YAML
@@ -180,7 +186,8 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
     In full mode, ``sandbox.docker_startup_overhead`` seconds (default 10)
     are added to both compile and run timeouts to account for Docker
     container startup latency, which is not part of the user's code
-    execution time.
+    execution time.  A ``finally`` block force-removes all containers and
+    runs ``chown -R`` to restore file ownership on bind-mounted directories.
 
     If *compile_command* is provided it is executed first; the run step is
     skipped when compilation fails (non-zero exit or timeout).  After
@@ -326,9 +333,9 @@ def restore_files(dir: str, files: Dict[str, Optional[str]]):
     """Write base64-encoded file payloads into a directory.
 
     Each entry in *files* maps a relative path to its base64-encoded content.
-    Intermediate directories are created as needed.  Entries whose content is
-    not a string or whose filename contains ``IGNORE_THIS_FILE`` are silently
-    skipped.
+    Intermediate directories are created as needed.  Entries are silently
+    skipped if the content is not a string (e.g. ``None``) or the filename
+    contains the sentinel ``IGNORE_THIS_FILE``.
 
     Args:
         dir: Target directory to write files into.

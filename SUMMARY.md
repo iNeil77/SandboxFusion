@@ -32,7 +32,8 @@ SandboxFusion/
 │   ├── configs/                  #   YAML-driven configuration
 │   │   ├── run_config.py         #     RunConfig pydantic model (singleton)
 │   │   ├── local.yaml            #     Local dev: isolation=lite, 34 concurrent runners
-│   │   └── ci.yaml               #     CI: isolation=lite, concurrency from pytest-xdist
+│   │   ├── ci.yaml               #     CI: isolation=lite, concurrency from pytest-xdist
+│   │   └── full_test.yaml        #     Full Docker mode: isolation=full, max_concurrency=0
 │   ├── utils/                    #   Shared utilities
 │   │   ├── sandbox_client.py     #     run_code_in_sandbox() with retry logic
 │   │   ├── execution.py          #     Concurrency control, process tree management
@@ -147,11 +148,12 @@ Both modes require Linux. `lite` requires root (sudo) for overlayfs/cgroups. `fu
 Controlled by YAML files selected via `SANDBOX_CONFIG` env var (default: `local`):
 - **`local.yaml`**: Lite isolation, max 34 concurrent runners, max 3 eval runner concurrency
 - **`ci.yaml`**: Lite isolation, max concurrency 0 (unlimited, controlled by pytest-xdist workers)
+- **`full_test.yaml`**: Full (Docker) isolation, max concurrency 0, for testing full mode
 
 Key config sections:
 - `sandbox.isolation`: `lite` | `full`
 - `sandbox.max_concurrency`: Limits simultaneous code executions
-- `sandbox.docker_image`: Docker image for `full` mode (default: `ineil77/sandbox-fusion-server:24042026-3`)
+- `sandbox.docker_image`: Docker image for `full` mode (default: `ineil77/sandbox-fusion-server:24042026-4`)
 - `sandbox.docker_startup_overhead`: Extra seconds added to timeouts in full mode for container startup (default: 10)
 - `eval.max_runner_concurrency`: Limits parallel test case runners (0 = unlimited)
 - `common.logging_color`: Colored structlog output
@@ -392,7 +394,7 @@ docker run --rm -i --name sandbox_a1b2c3d4 --memory 8192m --cpus 2 --network non
 
 **Overhead:** ~500 ms+ per execution (Docker daemon overhead, image layer setup, container creation/teardown).
 
-**Important:** The Docker image used must contain all language toolchains. The default is `ineil77/sandbox-fusion-server:24042026-3`, which extends the base image with all runtimes pre-built.
+**Important:** The Docker image used must contain all language toolchains. The default is `ineil77/sandbox-fusion-server:24042026-4`, which extends the base image with all runtimes pre-built.
 
 ### Server Async Execution Model
 
@@ -579,7 +581,7 @@ The recommended way to run SandboxFusion in production is via the pre-built serv
 ```bash
 docker run -d --rm --privileged \
     -p 8080:8080 \
-    ineil77/sandbox-fusion-server:24042026-3
+    ineil77/sandbox-fusion-server:24042026-4
 ```
 
 **Fully tuned launch:**
@@ -593,7 +595,7 @@ docker run -d --rm --privileged \
     --tmpfs /tmp:rw,nosuid,nodev,size=64g \
     -e PORT=8080 \
     -e SANDBOX_CONFIG=local \
-    ineil77/sandbox-fusion-server:24042026-3
+    ineil77/sandbox-fusion-server:24042026-4
 ```
 
 ### Resource Sizing Guidelines
@@ -615,7 +617,7 @@ docker run -d --rm --privileged \
     -p 8080:8080 \
     -v /path/to/production.yaml:/root/sandbox/sandbox/configs/production.yaml \
     -e SANDBOX_CONFIG=production \
-    ineil77/sandbox-fusion-server:24042026-3
+    ineil77/sandbox-fusion-server:24042026-4
 ```
 
 **Example `production.yaml` for a 64-core, 256 GB host:**
@@ -625,7 +627,7 @@ sandbox:
   max_concurrency: 30           # Leave cores for server + OS
   default_memory_limit_mb: 8192 # 8 GB per execution
   default_cpu_limit: 2          # 2 cores per execution
-  docker_image: ineil77/sandbox-fusion-server:24042026-3
+  docker_image: ineil77/sandbox-fusion-server:24042026-4
 
 eval:
   max_runner_concurrency: 10   # Parallel test cases per /submit request
@@ -636,18 +638,19 @@ common:
 
 ### Full Mode Setup (Docker-out-of-Docker)
 
-To use full mode inside a Docker container, mount the Docker socket **and share `/tmp`**:
+To use full mode inside a Docker container, mount the Docker socket **and share a temp directory**:
 
 ```bash
 docker run -d --rm --privileged \
     -p 8080:8080 \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    -v /tmp:/tmp \
+    -v /tmp/sandbox-shared:/tmp/sandbox-shared \
     -e SANDBOX_CONFIG=full_test \
-    ineil77/sandbox-fusion-server:24042026-3
+    -e SANDBOX_TMP_DIR=/tmp/sandbox-shared \
+    ineil77/sandbox-fusion-server:24042026-4
 ```
 
-**Critical:** The `-v /tmp:/tmp` mount is required. The server creates temp directories under `/tmp` and bind-mounts them into sibling execution containers via `-v /tmp/xyz:/tmp/xyz`. Because execution containers are siblings (created on the host Docker daemon, not nested), the `-v` path resolves on the **host**, not inside the server container. Without sharing `/tmp`, execution containers cannot access the source code files and all runs fail with "No such file or directory".
+**Critical:** The shared temp directory mount is required. The server creates temp directories under `SANDBOX_TMP_DIR` and bind-mounts them into sibling execution containers via `-v /tmp/sandbox-shared/xyz:/tmp/sandbox-shared/xyz`. Because execution containers are siblings (created on the host Docker daemon, not nested), the `-v` path resolves on the **host**, not inside the server container. Without sharing this directory, execution containers cannot access the source code files and all runs fail with "No such file or directory".
 
 In this configuration, each code execution spawns a sibling container on the host Docker daemon. The `docker_image` in the config must be available on the host. Memory and CPU limits are enforced per-container by Docker, not by the server's cgroup logic.
 
@@ -671,7 +674,7 @@ docker run ... --health-cmd "curl -f http://localhost:8080/v1/ping || exit 1" \
 
 The server logs structured JSON via `structlog` to stdout. In production, pipe to a log aggregator:
 ```bash
-docker run ... ineil77/sandbox-fusion-server:24042026-3 2>&1 | jq .
+docker run ... ineil77/sandbox-fusion-server:24042026-4 2>&1 | jq .
 ```
 
 ### Kubernetes Deployment Notes
@@ -708,9 +711,9 @@ Server listens on `http://0.0.0.0:8080` with endpoints:
 ### 2. Running via Docker (Production)
 
 ```bash
-make build-base-image                # builds ineil77/sandbox-fusion-base:24042026-3
-make build-server-image              # builds ineil77/sandbox-fusion-server:24042026-3
-docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:24042026-3
+make build-base-image                # builds ineil77/sandbox-fusion-base:24042026-4
+make build-server-image              # builds ineil77/sandbox-fusion-server:24042026-4
+docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:24042026-4
 ```
 
 ### 3. Using the Python Client SDK

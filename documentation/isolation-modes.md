@@ -21,7 +21,7 @@ Lite isolation is the default mode. It provides fast, lightweight isolation usin
 
 When a code execution request arrives, the sandbox:
 
-1. **Creates a temporary directory** under `/tmp` for the code and any uploaded files.
+1. **Creates a temporary directory** (under the path set by `SANDBOX_TMP_DIR`, defaulting to `/tmp`) for the code and any uploaded files.
 2. **Sets up an overlayfs mount**: The host filesystem is mounted read-only as the lower layer, with a disposable upper layer for writes. The executed code sees a copy-on-write view of the filesystem -- any modifications (including to system files) are discarded when execution completes.
 3. **Creates a cgroup** (v1 or v2, auto-detected): Applies memory and CPU limits to the sandbox process. Memory defaults to `sandbox.default_memory_limit_mb` (8192 MB), overridden per-request by `memory_limit_MB`. CPU defaults to `sandbox.default_cpu_limit` (2 cores).
 4. **Enters a network namespace**: The sandbox process is placed in a separate network namespace with NAT-bridged outbound connectivity (or no connectivity if `--no-bridge` is set).
@@ -34,7 +34,7 @@ When a code execution request arrives, the sandbox:
 
 - **Linux**: overlayfs, cgroups v1/v2 (auto-detected), and namespaces are Linux kernel features.
 - **Root / privileged**: Setting up overlayfs and cgroups requires root privileges. When running inside Docker, the container must be started with `--privileged`.
-- **Network namespace scripts**: The scripts `scripts/create_net_namespace.sh` and `scripts/clean_net_namespace.sh` manage the network namespace lifecycle.
+- **Network namespace scripts**: The scripts `scripts/create_net_namespace.sh` and `scripts/clean_net_namespace.sh` manage the network namespace lifecycle. Veth interface names are truncated (e.g., `ve-a1b2c3` / `ve-a1b2c3-br`) to comply with Linux's 15-character interface name limit.
 
 ### Configuration
 
@@ -64,7 +64,7 @@ Full isolation runs each code execution inside a disposable Docker container. Th
 
 When a code execution request arrives, the sandbox:
 
-1. **Launches a Docker container** from the configured `docker_image` (default: `ineil77/sandbox-fusion-server:24042026-3`) with these flags:
+1. **Launches a Docker container** from the configured `docker_image` (default: `ineil77/sandbox-fusion-server:24042026-4`) with these flags:
    - `--rm` -- Container is automatically removed after exit.
    - `--name sandbox_<random_hex>` -- Unique container name for reliable force-removal on cleanup.
    - `--memory` -- Memory limit from the request or `sandbox.default_memory_limit_mb` (default 8192 MB).
@@ -72,17 +72,17 @@ When a code execution request arrives, the sandbox:
    - `--network none` -- Complete network isolation (no egress traffic possible).
    - `--pids-limit 1024` -- Limits the number of processes/threads to prevent fork bombs. Set to 1024 to accommodate toolchains like Lean's LLVM linker that spawn many threads.
 2. **Mounts the temporary directory** containing the code and uploaded files into the container via `-v <workdir>:<workdir>`.
-3. **Adds `docker_startup_overhead`** seconds (default 10) to timeouts to account for Docker startup latency separate from code execution time.
-4. **Executes the compile and run commands** inside the container (each in a separate container with its own unique name).
+3. **Adds `docker_startup_overhead`** seconds (default 10) to timeouts to account for Docker startup latency separate from code execution time. The user's code is wrapped with the `timeout` command inside the container; exit code 124 is detected and reported as `TimeLimitExceeded`.
+4. **Executes the compile and run commands** inside the container (each in a separate container with its own unique name). All commands are shell-quoted via `shlex.quote()` to prevent injection.
 5. **Collects results** (stdout, stderr, exit code, fetched files) from the bind-mounted host directory.
-6. **Force-removes all containers** via `docker rm -f` in a `finally` block, ensuring no leaked containers even on unexpected errors or interruptions.
+6. **Force-removes all containers** via `docker rm -f` in a `finally` block, then runs `chown -R` to restore file ownership on bind-mounted directories, ensuring no leaked containers or permission issues even on unexpected errors.
 
 ### Requirements
 
 - **Docker daemon**: Must be installed and running on the host.
-- **`ineil77/sandbox-fusion-server:24042026-3` image**: The Docker image must have all language runtimes pre-installed. Build it with `make build-server-image`.
+- **`ineil77/sandbox-fusion-server:24042026-4` image**: The Docker image must have all language runtimes pre-installed. Build it with `make build-server-image`.
 - **No nested Docker**: Full isolation does NOT use Docker-in-Docker. The host Docker daemon creates sibling containers (Docker-out-of-Docker).
-- **Shared `/tmp`**: When the server runs inside Docker, launch with `-v /tmp:/tmp` so that sibling execution containers can access the temp directories created by the server. Without this, all executions fail with "No such file or directory".
+- **Shared temp directory**: When the server runs inside Docker, mount a shared temp directory (e.g., `-v /tmp/sandbox-shared:/tmp/sandbox-shared`) and set `-e SANDBOX_TMP_DIR=/tmp/sandbox-shared` so that sibling execution containers can access the temp directories created by the server. The bind mount source is resolved on the Docker **host**, so the path must exist on the host and be shared between the server container and execution containers. Without this, all executions fail with "No such file or directory".
 - **Docker socket**: The server container needs `-v /var/run/docker.sock:/var/run/docker.sock` to communicate with the host Docker daemon.
 
 ### Configuration
@@ -91,12 +91,12 @@ When a code execution request arrives, the sandbox:
 sandbox:
   isolation: full
   max_concurrency: 100
-  docker_image: ineil77/sandbox-fusion-server:24042026-3
+  docker_image: ineil77/sandbox-fusion-server:24042026-4
   default_memory_limit_mb: 8192
   default_cpu_limit: 2
 ```
 
-The `docker_image` field specifies which image to use for execution containers. It defaults to `ineil77/sandbox-fusion-server:24042026-3`, which is built by `make build-server-image` and includes all 20+ language runtimes.
+The `docker_image` field specifies which image to use for execution containers. It defaults to `ineil77/sandbox-fusion-server:24042026-4`, which is built by `make build-server-image` and includes all 20+ language runtimes.
 
 **Launching for full mode (Docker-out-of-Docker):**
 
@@ -104,9 +104,10 @@ The `docker_image` field specifies which image to use for execution containers. 
 docker run -d --rm --privileged \
     -p 8080:8080 \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    -v /tmp:/tmp \
+    -v /tmp/sandbox-shared:/tmp/sandbox-shared \
     -e SANDBOX_CONFIG=full_test \
-    ineil77/sandbox-fusion-server:24042026-3
+    -e SANDBOX_TMP_DIR=/tmp/sandbox-shared \
+    ineil77/sandbox-fusion-server:24042026-4
 ```
 
 ---
@@ -124,7 +125,7 @@ docker run -d --rm --privileged \
 ### Typical deployment patterns
 
 **Docker deployment (recommended):**
-- Build `ineil77/sandbox-fusion-server:24042026-3` which runs the SandboxFusion server inside a Docker container.
+- Build `ineil77/sandbox-fusion-server:24042026-4` which runs the SandboxFusion server inside a Docker container.
 - The server uses **lite** isolation inside the container (overlayfs + cgroups within the privileged container).
 - The container needs `--privileged` for overlayfs/cgroups.
 - No nested Docker involved.
@@ -135,8 +136,8 @@ docker run -d --rm --privileged \
 - Requires root/sudo for overlayfs and cgroups.
 
 **Full isolation deployment:**
-- The SandboxFusion server runs on the host (or in a container with Docker socket access and `-v /tmp:/tmp`).
-- Each code execution spawns a separate `ineil77/sandbox-fusion-server:24042026-3` container via the host Docker daemon.
+- The SandboxFusion server runs on the host (or in a container with Docker socket access and a shared temp directory via `-v /tmp/sandbox-shared:/tmp/sandbox-shared -e SANDBOX_TMP_DIR=/tmp/sandbox-shared`).
+- Each code execution spawns a separate `ineil77/sandbox-fusion-server:24042026-4` container via the host Docker daemon.
 - Use when you want maximum isolation and can tolerate higher latency.
 
 ### Behavioral differences between modes
@@ -154,7 +155,7 @@ docker run -d --rm --privileged \
 
 Regardless of isolation mode, the general code execution flow is:
 
-1. Create a temporary directory under `/tmp`.
+1. Create a temporary directory (under `SANDBOX_TMP_DIR`, defaulting to `/tmp`).
 2. Write files passed through the `files` parameter.
 3. Write the `code` parameter to a temporary file (e.g. `/tmp/tmpha4dcl5b/tmpx8k1pnfh.py`).
 4. Set up the isolation environment (overlayfs + cgroup + namespace for lite, or Docker container for full).

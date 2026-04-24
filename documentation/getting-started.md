@@ -52,23 +52,24 @@ git clone https://github.com/<your-org>/SandboxFusion.git
 cd SandboxFusion
 
 # Build the base image (installs all language runtimes -- takes ~20 min first time)
-make build-base-image       # produces ineil77/sandbox-fusion-base:24042026-3
+make build-base-image       # produces ineil77/sandbox-fusion-base:24042026-4
 
-# Build the server image (adds the app + Python deps on top of ineil77/sandbox-fusion-base:24042026-3)
-make build-server-image     # produces ineil77/sandbox-fusion-server:24042026-3
+# Build the server image (adds the app + Python deps on top of ineil77/sandbox-fusion-base:24042026-4)
+make build-server-image     # produces ineil77/sandbox-fusion-server:24042026-4
 
 # Run the server
-docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:24042026-3
+docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:24042026-4
 ```
 
-The `--privileged` flag is required because the sandbox uses overlayfs, cgroups, and network namespaces for lite isolation. If you run with `full` isolation mode, also mount the Docker socket and share `/tmp`:
+The `--privileged` flag is required because the sandbox uses overlayfs, cgroups, and network namespaces for lite isolation. If you run with `full` isolation mode, also mount the Docker socket and share a temp directory:
 
 ```bash
 docker run -d --rm --privileged -p 8080:8080 \
     -v /var/run/docker.sock:/var/run/docker.sock \
-    -v /tmp:/tmp \
+    -v /tmp/sandbox-shared:/tmp/sandbox-shared \
     -e SANDBOX_CONFIG=full_test \
-    ineil77/sandbox-fusion-server:24042026-3
+    -e SANDBOX_TMP_DIR=/tmp/sandbox-shared \
+    ineil77/sandbox-fusion-server:24042026-4
 ```
 
 Nested Docker is **not** used; execution containers are siblings on the host daemon. See the [Isolation Modes](isolation-modes.md) document for details.

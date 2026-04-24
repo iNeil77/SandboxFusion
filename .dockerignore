@@ -185,7 +185,6 @@ core.*
 
 # Docker build exclusions
 documentation/
-sandbox/tests/
 *.md
 !README.md
 .claude/

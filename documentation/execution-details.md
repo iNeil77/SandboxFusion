@@ -1,6 +1,6 @@
 # Execution Details
 
-This document describes how each supported language is compiled and executed inside the sandbox. All code is executed in a temporary directory created under `/tmp` that is destroyed after execution.
+This document describes how each supported language is compiled and executed inside the sandbox. All code is executed in a temporary directory (location controlled by the `SANDBOX_TMP_DIR` environment variable, defaulting to `/tmp`) that is destroyed after execution.
 
 ---
 

@@ -205,7 +205,7 @@ done
 def _normalize_stderr(stderr: str) -> str:
     """Strip temp directory paths and filenames from stderr so comparisons ignore path variance."""
     import re
-    return re.sub(r'/tmp/tmp[a-zA-Z0-9_]+/tmp[a-zA-Z0-9_]+\.\w+', '/tmp/TMP/TMP_FILE', stderr)
+    return re.sub(r'/tmp/[^\s"\',:]+\.\w+', '/tmp/TMP_FILE', stderr)
 
 
 def test_python_error_consistency():

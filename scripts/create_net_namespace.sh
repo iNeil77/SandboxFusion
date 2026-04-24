@@ -11,6 +11,10 @@
 #   - IP forwarding and NAT masquerading are enabled so the namespace can
 #     reach external networks through the host.
 #
+# Veth interface names are derived from the first 6 characters of the
+# namespace name (e.g. ve-a1b2c3 / ve-a1b2c3-br) to stay within Linux's
+# 15-character interface name limit.
+#
 # Pass --no-bridge to create the namespace with only a loopback interface
 # (fully network-isolated, no external connectivity).
 # =============================================================================
@@ -29,6 +33,11 @@ fi
 NAMESPACE=$1
 SUBNET=$2
 CREATE_BRIDGE=true
+# Linux interface names are limited to 15 characters.
+# Use first 6 chars of the namespace name as the veth suffix.
+VETH_ID=${NAMESPACE:0:6}
+VETH_NS="ve-${VETH_ID}"
+VETH_BR="ve-${VETH_ID}-br"
 
 if [ "$#" -eq 3 ]; then
     if [ "$3" == "--no-bridge" ]; then
@@ -50,7 +59,7 @@ cleanup_on_failure() {
         EXTERNAL_IFACE=$(ip route | grep default | awk '{print $5}')
         [ -n "$EXTERNAL_IFACE" ] && \
             sudo iptables -w -t nat -D POSTROUTING -s ${SUBNET}.0/24 -o $EXTERNAL_IFACE -j MASQUERADE 2>/dev/null
-        sudo ip link delete veth-$NAMESPACE-br 2>/dev/null
+        sudo ip link delete $VETH_BR 2>/dev/null
     fi
     sudo ip netns delete $NAMESPACE 2>/dev/null
 }
@@ -60,14 +69,14 @@ trap cleanup_on_failure ERR
 sudo ip netns add $NAMESPACE
 
 if $CREATE_BRIDGE; then
-    sudo ip link add veth-$NAMESPACE type veth peer name veth-$NAMESPACE-br
-    sudo ip link set veth-$NAMESPACE netns $NAMESPACE
+    sudo ip link add $VETH_NS type veth peer name $VETH_BR
+    sudo ip link set $VETH_NS netns $NAMESPACE
 
-    sudo ip addr add $HOST_IP/24 dev veth-$NAMESPACE-br
-    sudo ip link set veth-$NAMESPACE-br up
+    sudo ip addr add $HOST_IP/24 dev $VETH_BR
+    sudo ip link set $VETH_BR up
 
-    sudo ip netns exec $NAMESPACE ip addr add $NS_IP/24 dev veth-$NAMESPACE
-    sudo ip netns exec $NAMESPACE ip link set veth-$NAMESPACE up
+    sudo ip netns exec $NAMESPACE ip addr add $NS_IP/24 dev $VETH_NS
+    sudo ip netns exec $NAMESPACE ip link set $VETH_NS up
 fi
 
 # --- Bring up the loopback interface inside the namespace ---

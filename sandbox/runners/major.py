@@ -52,13 +52,13 @@ _DOCKER_RUNTIME_DIR = '/root/sandbox/runtime'
 
 
 def _runtime_dir(subpath: str) -> str:
-    """Return the absolute path to a runtime sub-directory.
+    """Return the absolute path to a runtime sub-directory *inside the sandbox*.
 
-    In full (Docker) mode the runtimes live at a well-known location inside
-    the Docker image; in lite mode they live relative to this source tree.
+    Both isolation modes execute code inside the Docker image's filesystem
+    (lite mode overlays it; full mode runs a container from it), so
+    symlink targets must point to the image's well-known layout.
     """
-    base = _DOCKER_RUNTIME_DIR if config.sandbox.isolation == 'full' else _HOST_RUNTIME_DIR
-    return os.path.join(base, subpath)
+    return os.path.join(_DOCKER_RUNTIME_DIR, subpath)
 
 
 _DOCKER_IMAGE_BASE_PATH = (
