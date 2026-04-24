@@ -45,10 +45,28 @@ from sandbox.utils.execution import get_output_non_blocking, kill_process_tree
 logger = structlog.stdlib.get_logger()
 config = RunConfig.get_instance_sync()
 
+_cached_base_env: dict | None = None
+
+
+def _get_base_env() -> dict:
+    """Return a cached copy of os.environ to avoid re-copying on every subprocess spawn."""
+    global _cached_base_env
+    if _cached_base_env is None:
+        _cached_base_env = dict(os.environ)
+    return _cached_base_env
+
 
 def _shell_quote(s: str) -> str:
     """Shell-quote a string for safe embedding inside bash -c '...'."""
     return shlex.quote(s)
+
+
+def _close_subprocess_pipes(p):
+    """Close all pipe transports on an asyncio subprocess to release file descriptors."""
+    for fd in (0, 1, 2):
+        transport = p._transport.get_pipe_transport(fd)
+        if transport is not None and not transport.is_closing():
+            transport.close()
 
 
 async def run_command_bare(command: str | List[str],
@@ -85,15 +103,13 @@ async def run_command_bare(command: str | List[str],
     p = None
     try:
         logger.debug(f'running command {command}')
+        env = {**_get_base_env(), **(extra_env or {})} if extra_env else _get_base_env()
         if use_exec:
             p = await asyncio.create_subprocess_exec(*command,
                                                      stdin=subprocess.PIPE,
                                                      stdout=subprocess.PIPE,
                                                      stderr=subprocess.PIPE,
-                                                     env={
-                                                         **os.environ,
-                                                         **(extra_env or {})
-                                                     },
+                                                     env=env,
                                                      preexec_fn=preexec_fn)
         else:
             p = await asyncio.create_subprocess_shell(command,
@@ -102,10 +118,7 @@ async def run_command_bare(command: str | List[str],
                                                       stderr=subprocess.PIPE,
                                                       cwd=cwd,
                                                       executable='/bin/bash',
-                                                      env={
-                                                          **os.environ,
-                                                          **(extra_env or {})
-                                                      },
+                                                      env=env,
                                                       preexec_fn=preexec_fn)
         if stdin is not None:
             try:
@@ -131,17 +144,21 @@ async def run_command_bare(command: str | List[str],
 
         execution_time = time.time() - start_time
 
-        # Kill the entire process tree and reap zombies in a thread so the
-        # synchronous psutil.wait_procs() call doesn't block the event loop.
-        await asyncio.to_thread(kill_process_tree, p.pid)
-        # Ensure the asyncio child watcher also reaps the top-level process.
-        try:
-            await asyncio.wait_for(p.wait(), timeout=5)
-        except asyncio.TimeoutError:
-            logger.warning('process not reaped after kill', pid=p.pid)
+        if timed_out:
+            # Kill the entire process tree and reap zombies in a thread so the
+            # synchronous psutil.wait_procs() call doesn't block the event loop.
+            await asyncio.to_thread(kill_process_tree, p.pid)
+            # Ensure the asyncio child watcher also reaps the top-level process.
+            try:
+                await asyncio.wait_for(p.wait(), timeout=5)
+            except asyncio.TimeoutError:
+                logger.warning('process not reaped after kill', pid=p.pid)
 
-        stdout = await get_output_non_blocking(p.stdout)
-        stderr = await get_output_non_blocking(p.stderr)
+        stdout, stderr = await asyncio.gather(
+            get_output_non_blocking(p.stdout),
+            get_output_non_blocking(p.stderr),
+        )
+        _close_subprocess_pipes(p)
 
         if timed_out:
             return CommandRunResult(status=CommandRunStatus.TimeLimitExceeded,
@@ -154,12 +171,15 @@ async def run_command_bare(command: str | List[str],
                                 return_code=p.returncode,
                                 stdout=stdout,
                                 stderr=stderr)
-    except Exception as e:
+    except BaseException as e:
         if p is not None:
             kill_process_tree(p.pid)  # sync is OK here; we're already failing
-        message = f'exception on running command {command}: {e} | {traceback.print_tb(e.__traceback__)}'
-        logger.warning(message)
-        return CommandRunResult(status=CommandRunStatus.Error, stderr=message)
+            _close_subprocess_pipes(p)
+        if isinstance(e, Exception):
+            message = f'exception on running command {command}: {e} | {traceback.print_tb(e.__traceback__)}'
+            logger.warning(message)
+            return CommandRunResult(status=CommandRunStatus.Error, stderr=message)
+        raise
 
 
 async def run_commands(compile_command: Optional[str], run_command: str, cwd: str, extra_env: Optional[Dict[str, str]],
@@ -294,7 +314,8 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
                     run_res.status = CommandRunStatus.TimeLimitExceeded
                     run_res.return_code = None
         finally:
-            for name in container_names:
+            async def _rm_container(name):
+                rm = None
                 try:
                     rm = await asyncio.create_subprocess_exec(
                         'docker', 'rm', '-f', name,
@@ -302,10 +323,18 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
                         stderr=asyncio.subprocess.DEVNULL,
                     )
                     await asyncio.wait_for(rm.wait(), timeout=10)
+                except asyncio.TimeoutError:
+                    if rm is not None:
+                        rm.kill()
+                    logger.warning('docker rm timed out', name=name)
                 except Exception:
                     logger.warning('failed to force-remove docker container', name=name)
+
+            if container_names:
+                await asyncio.gather(*[_rm_container(n) for n in container_names])
             # Docker containers create files as root inside bind-mounted cwd.
             # Fix ownership so the caller's TemporaryDirectory cleanup succeeds.
+            fix = None
             try:
                 fix = await asyncio.create_subprocess_exec(
                     'docker', 'run', '--rm',
@@ -316,6 +345,10 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
                     stderr=asyncio.subprocess.DEVNULL,
                 )
                 await asyncio.wait_for(fix.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                if fix is not None:
+                    fix.kill()
+                logger.warning('docker chown timed out', cwd=cwd)
             except Exception:
                 pass
 

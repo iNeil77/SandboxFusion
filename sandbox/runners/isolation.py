@@ -105,16 +105,24 @@ def _init_cgroup_v2_delegation():
             logger.warning(f'Failed to initialize cgroup v2 delegation: {e}')
 
 
-async def execute_command(cmd: List[str], raise_nonzero: bool = True):
+_EXECUTE_CMD_TIMEOUT = 30
+
+
+async def execute_command(cmd: List[str], raise_nonzero: bool = True, timeout: float = _EXECUTE_CMD_TIMEOUT):
     """Run a command as an async subprocess and optionally raise on failure.
 
     Args:
         cmd: Argument list for the command to execute.
         raise_nonzero: If True (default), raise ``RuntimeError`` when the
             process exits with a non-zero return code.
+        timeout: Maximum seconds to wait for the command to complete.
     """
     process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    stdout, stderr = await process.communicate()
+    try:
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        process.kill()
+        raise RuntimeError(f'Command timed out after {timeout}s: {" ".join(cmd)}')
 
     if process.returncode != 0 and raise_nonzero:
         raise RuntimeError(f'Failed to execute {" ".join(cmd)}: {stdout.decode()}\n{stderr.decode()}')
@@ -208,11 +216,20 @@ async def tmp_overlayfs():
             f'lowerdir=/,upperdir={upper_dir},workdir={work_dir}', merged_dir
         ]
         await execute_command(mount_cmd)
-        await execute_command(['sudo', 'mount', '-t', 'proc', '/proc', f'{merged_dir}/proc'])
-        await execute_command(['sudo', 'mount', '-t', 'sysfs', '/sys', f'{merged_dir}/sys'])
-        await execute_command(['sudo', 'mount', '--rbind', '/dev', f'{merged_dir}/dev'])
-        await execute_command(['cp', '/etc/hosts', f'{merged_dir}/etc/'])
-        await execute_command(['cp', '/etc/resolv.conf', f'{merged_dir}/etc/'])
+
+        async def _mount_dev():
+            await execute_command(['sudo', 'mount', '--rbind', '/dev', f'{merged_dir}/dev'])
+            await execute_command(['sudo', 'mount', '--make-rprivate', f'{merged_dir}/dev'])
+
+        await asyncio.gather(
+            execute_command(['sudo', 'mount', '-t', 'proc', '/proc', f'{merged_dir}/proc']),
+            execute_command(['sudo', 'mount', '-t', 'sysfs', '/sys', f'{merged_dir}/sys']),
+            _mount_dev(),
+        )
+        await execute_command([
+            'cp', '/etc/hosts', f'{merged_dir}/etc/',
+            '/etc/resolv.conf', f'{merged_dir}/etc/',
+        ], raise_nonzero=False)
     except BaseException:
         await _sweep_remaining_mounts(base_dir)
         try:
@@ -221,43 +238,67 @@ async def tmp_overlayfs():
             pass
         raise
 
-    yield merged_dir
-
-    # Each unmount is isolated so one failure cannot skip the rest.
-    # /dev uses recursive unmount because --rbind creates submounts.
-    for mp, recursive in [
-        (f'{merged_dir}/dev', True),
-        (f'{merged_dir}/sys', False),
-        (f'{merged_dir}/proc', False),
-        (merged_dir, False),
-        (tmpfs_dir, False),
-    ]:
-        try:
-            await unmount_fs(mp, recursive=recursive)
-        except Exception:
-            logger.warning('unmount failed, will retry in sweep', mount_point=mp)
-
-    # Safety-net: enumerate any remaining mounts under base_dir and force-detach them.
-    await _sweep_remaining_mounts(base_dir)
-
     try:
-        await asyncio.to_thread(shutil.rmtree, base_dir)
-    except Exception:
-        logger.warning('rmtree failed for overlay dir', path=base_dir)
+        yield merged_dir
+    finally:
+        # Batch all unmounts into a single shell invocation to avoid spawning
+        # 5 separate subprocesses.  /dev uses -R for recursive unmount because
+        # --rbind creates submounts; the rest use plain -l.
+        batch_umount = (
+            f'umount -Rl {merged_dir}/dev 2>/dev/null;'
+            f'umount -l {merged_dir}/sys 2>/dev/null;'
+            f'umount -l {merged_dir}/proc 2>/dev/null;'
+            f'umount -l {merged_dir} 2>/dev/null;'
+            f'umount -l {tmpfs_dir} 2>/dev/null;'
+            f'true'
+        )
+        try:
+            await execute_command(['sudo', 'bash', '-c', batch_umount], raise_nonzero=False)
+        except Exception:
+            logger.warning('batch unmount failed, falling back to sweep', base_dir=base_dir)
+
+        # Safety-net: enumerate any remaining mounts under base_dir and force-detach them.
+        remaining = await asyncio.to_thread(_read_mounts_under, base_dir)
+        if remaining:
+            await _sweep_remaining_mounts(base_dir)
+            remaining = await asyncio.to_thread(_read_mounts_under, base_dir)
+            if remaining:
+                await asyncio.sleep(0.5)
+                await _sweep_remaining_mounts(base_dir)
+                still = await asyncio.to_thread(_read_mounts_under, base_dir)
+                if still:
+                    logger.error('mounts still present after sweep retries', base_dir=base_dir, mounts=still)
+
+        try:
+            await asyncio.to_thread(shutil.rmtree, base_dir)
+        except Exception:
+            logger.warning('rmtree failed for overlay dir', path=base_dir)
+
+
+async def _wait_pid_exit(pid: str, label: str):
+    """Wait for a process to exit with exponential backoff (max ~5s total)."""
+    delay = 0.005
+    elapsed = 0.0
+    while elapsed < 5.0:
+        if not os.path.exists(f'/proc/{pid}'):
+            return
+        await asyncio.sleep(delay)
+        elapsed += delay
+        delay = min(delay * 2, 0.5)
+    logger.warning(f'{label} process still alive after kill', pid=pid)
 
 
 async def _cleanup_group_v1(cg):
     """Kill all processes in a cgroup v1 group and delete it."""
     try:
         with open(f'/sys/fs/cgroup/{cg.replace(":", "/")}/tasks', 'r') as f:
-            pids = f.read().splitlines()
+            pids = [p.strip() for p in f.read().splitlines() if p.strip()]
 
-        for pid in pids:
-            while True:
-                await execute_command(['sudo', 'kill', '-9', pid], False)
-                if not os.path.exists(f'/proc/{pid}'):
-                    break
-                await asyncio.sleep(1)
+        if pids:
+            await execute_command(
+                ['sudo', 'bash', '-c', ' '.join(f'kill -9 {pid};' for pid in pids) + 'true'],
+                raise_nonzero=False)
+            await asyncio.gather(*[_wait_pid_exit(pid, f'cgroup v1 ({cg})') for pid in pids])
 
         await execute_command(['sudo', 'cgdelete', '-g', cg])
     except Exception as e:
@@ -270,14 +311,12 @@ async def _cleanup_group_v2(cg_path):
         procs_file = os.path.join(cg_path, 'cgroup.procs')
         if os.path.isfile(procs_file):
             with open(procs_file, 'r') as f:
-                pids = f.read().splitlines()
-            for pid in pids:
-                if pid.strip():
-                    await execute_command(['sudo', 'kill', '-9', pid], False)
-                    for _ in range(50):
-                        if not os.path.exists(f'/proc/{pid}'):
-                            break
-                        await asyncio.sleep(0.1)
+                pids = [p.strip() for p in f.read().splitlines() if p.strip()]
+            if pids:
+                await execute_command(
+                    ['sudo', 'bash', '-c', ' '.join(f'kill -9 {pid};' for pid in pids) + 'true'],
+                    raise_nonzero=False)
+                await asyncio.gather(*[_wait_pid_exit(pid, f'cgroup v2 ({cg_path})') for pid in pids])
         await execute_command(['sudo', 'rmdir', cg_path], False)
     except Exception as e:
         logger.error(f"Error cleaning up cgroup v2 {cg_path}: {e}")
@@ -318,15 +357,16 @@ async def tmp_cgroup(mem_limit: Optional[str] = None, cpu_limit: Optional[float]
         _init_cgroup_v2_delegation()
         cg_name = f'sandbox_{random_cgroup_name()}'
         cg_path = f'/sys/fs/cgroup/{cg_name}'
-        await execute_command(['sudo', 'mkdir', '-p', cg_path])
 
+        # Batch mkdir + limit writes into a single shell invocation.
+        setup_script = f'mkdir -p {cg_path}'
         if mem_limit is not None:
             mem_bytes = str(_parse_mem_limit(mem_limit))
-            await execute_command(['sudo', 'bash', '-c', f'echo {mem_bytes} > {cg_path}/memory.max'])
-
+            setup_script += f' && echo {mem_bytes} > {cg_path}/memory.max'
         if cpu_limit is not None:
             quota = int(100000 * cpu_limit)
-            await execute_command(['sudo', 'bash', '-c', f'echo "{quota} 100000" > {cg_path}/cpu.max'])
+            setup_script += f' && echo "{quota} 100000" > {cg_path}/cpu.max'
+        await execute_command(['sudo', 'bash', '-c', setup_script])
 
         wrapper = f'/tmp/cg_enter_{cg_name}.sh'
         with open(wrapper, 'w') as f:
@@ -343,25 +383,37 @@ async def tmp_cgroup(mem_limit: Optional[str] = None, cpu_limit: Optional[float]
                 pass
     else:
         groups = []
+        setup_tasks = []
 
         if mem_limit is not None:
             mem_group_name = f'sandbox_mem_{random_cgroup_name()}'
-            await execute_command(['sudo', 'cgcreate', '-g', f'memory:{mem_group_name}'])
-            await execute_command(['sudo', 'cgset', '-r', f'memory.limit_in_bytes={mem_limit}', mem_group_name])
             groups.append(f'memory:{mem_group_name}')
+            setup_tasks.append(execute_command([
+                'sudo', 'bash', '-c',
+                f'cgcreate -g memory:{mem_group_name} && '
+                f'cgset -r memory.limit_in_bytes={mem_limit} {mem_group_name}'
+            ]))
 
         if cpu_limit is not None:
             cpu_group_name = f'sandbox_cpu_{random_cgroup_name()}'
-            await execute_command(['sudo', 'cgcreate', '-g', f'cpu:{cpu_group_name}'])
-            await execute_command(['sudo', 'cgset', '-r', f'cpu.cfs_quota_us={int(100000 * cpu_limit)}', cpu_group_name])
-            await execute_command(['sudo', 'cgset', '-r', f'cpu.cfs_period_us=100000', cpu_group_name])
             groups.append(f'cpu:{cpu_group_name}')
+            setup_tasks.append(execute_command([
+                'sudo', 'bash', '-c',
+                f'cgcreate -g cpu:{cpu_group_name} && '
+                f'cgset -r cpu.cfs_quota_us={int(100000 * cpu_limit)} {cpu_group_name} && '
+                f'cgset -r cpu.cfs_period_us=100000 {cpu_group_name}'
+            ]))
+
+        if setup_tasks:
+            await asyncio.gather(*setup_tasks)
 
         try:
             yield groups
         finally:
-            for cg in groups:
-                await _cleanup_group_v1(cg)
+            if len(groups) > 1:
+                await asyncio.gather(*[_cleanup_group_v1(cg) for cg in groups])
+            elif groups:
+                await _cleanup_group_v1(groups[0])
 
 
 # Pool of /24 subnets in the 172.16.0.0/12 private range, used by
@@ -373,6 +425,19 @@ async def tmp_cgroup(mem_limit: Optional[str] = None, cpu_limit: Optional[float]
 # async requests popping/appending on the same list.
 _available_subnets: list = []
 _subnet_lock = threading.Lock()
+_subnet_available_event: asyncio.Event | None = None
+
+
+def _get_subnet_event() -> asyncio.Event:
+    """Lazily create the subnet availability event (must be called within an event loop)."""
+    global _subnet_available_event
+    if _subnet_available_event is None:
+        _subnet_available_event = asyncio.Event()
+        if _available_subnets:
+            _subnet_available_event.set()
+    return _subnet_available_event
+
+
 pytest_worker_id = os.environ.get("PYTEST_XDIST_WORKER")
 if pytest_worker_id is not None:
     for j in range(0, 256):
@@ -406,6 +471,9 @@ def return_subnet_ip_rfc_2322(ip):
     """
     with _subnet_lock:
         _available_subnets.append(ip)
+    evt = _subnet_available_event
+    if evt is not None:
+        evt.set()
 
 
 _SUBNET_ACQUIRE_TIMEOUT = 60
@@ -432,15 +500,21 @@ async def tmp_netns(no_bridge: bool = False):
         The name of the newly created network namespace.
     """
     net_ns_name = random_cgroup_name()
+    evt = _get_subnet_event()
     deadline = time.monotonic() + _SUBNET_ACQUIRE_TIMEOUT
     while True:
         subnet_ip = get_subnet_ip_rfc_2322()
         if subnet_ip is not None:
             break
-        if time.monotonic() >= deadline:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             raise RuntimeError(
                 f'subnet pool exhausted: no subnet available after {_SUBNET_ACQUIRE_TIMEOUT}s')
-        await asyncio.sleep(0.5)
+        evt.clear()
+        try:
+            await asyncio.wait_for(evt.wait(), timeout=min(remaining, 5.0))
+        except asyncio.TimeoutError:
+            pass
     args = [net_ns_name, subnet_ip]
     if no_bridge:
         args += ['--no-bridge']

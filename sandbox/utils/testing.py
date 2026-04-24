@@ -32,11 +32,19 @@ from sandbox.configs.run_config import RunConfig
 from sandbox.datasets.types import EvalTestCase, GeneralStdioTest, RunStatus, TestConfig
 from sandbox.runners.types import compile_languages
 from sandbox.utils.common import truncate_str
-from sandbox.utils.execution import max_concurrency
 from sandbox.utils.sandbox_client import RunCodeRequest, run_code_in_sandbox, run_code_in_sandbox_w_retry
 
 eval_config = RunConfig.get_instance_sync()
 logger = structlog.stdlib.get_logger()
+
+_runner_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_runner_semaphore() -> asyncio.Semaphore | None:
+    global _runner_semaphore
+    if _runner_semaphore is None and eval_config.eval.max_runner_concurrency > 0:
+        _runner_semaphore = asyncio.Semaphore(eval_config.eval.max_runner_concurrency)
+    return _runner_semaphore
 
 
 async def check_auto_test_case(code: str, config: TestConfig) -> EvalTestCase:
@@ -199,7 +207,7 @@ async def check_stdio_test_cases_parallel(code: str,
 
     Creates an asyncio task for each test case and awaits them in order. If
     ``max_runner_concurrency`` is configured in ``RunConfig.eval``, applies a
-    concurrency limit via :func:`max_concurrency`. By default, stops on the
+    concurrency limit via a shared semaphore. By default, stops on the
     first failure and cancels remaining tasks; set ``config.extra['run_all_cases']``
     to ``True`` to continue past failures.
 
@@ -221,13 +229,16 @@ async def check_stdio_test_cases_parallel(code: str,
     result = []
     tasks: List[asyncio.Task[EvalTestCase]] = []
 
-    check_stdio_test_case_limited = check_stdio_test_case
-    if eval_config.eval.max_runner_concurrency > 0:
-        check_stdio_test_case_limited = max_concurrency(
-            eval_config.eval.max_runner_concurrency)(check_stdio_test_case)
+    sem = _get_runner_semaphore()
+
+    async def _run_limited(code, case, config, lower_cmp):
+        if sem is not None:
+            async with sem:
+                return await check_stdio_test_case(code, case, config, lower_cmp)
+        return await check_stdio_test_case(code, case, config, lower_cmp)
 
     for case in cases:
-        task = asyncio.create_task(check_stdio_test_case_limited(code, case, config, lower_cmp))
+        task = asyncio.create_task(_run_limited(code, case, config, lower_cmp))
         tasks.append(task)
 
     run_all_cases = config.extra.get("run_all_cases", False)

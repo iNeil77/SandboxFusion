@@ -19,15 +19,11 @@ generation, async context manager pooling, conda environment detection,
 PHP code normalization, JSON parsing, string truncation, and JSONL file loading.
 """
 
-import functools
 import json
 import os
-import random
 import secrets
 import string
 import sys
-from collections import defaultdict
-from contextlib import asynccontextmanager
 from typing import Any, Dict
 
 
@@ -60,46 +56,6 @@ def random_cgroup_name() -> str:
         A 16-character string of random lowercase ASCII letters.
     """
     return ''.join(secrets.choice(string.ascii_lowercase) for _ in range(16))
-
-
-def cached_context(cm_factory):
-    """Decorator that pools resources from an async context manager factory.
-
-    Wraps an async context manager factory so that resources are reused instead
-    of being created and torn down on every use. On the first call with a given
-    set of arguments, a new resource is created via the factory's ``__aenter__``.
-    On subsequent calls with the same arguments, a previously returned resource
-    is reused from the pool. When the ``async with`` block exits, the resource
-    is returned to the pool rather than being destroyed.
-
-    Args:
-        cm_factory: An async context manager factory (a callable that returns
-            an async context manager).
-
-    Returns:
-        A wrapped async context manager factory with resource pooling behavior.
-    """
-
-    def hash_args(args, kwargs):
-        return str(args) + str(kwargs)
-
-    pool = defaultdict(list)
-
-    @functools.wraps(cm_factory)
-    @asynccontextmanager
-    async def wrapper(*args, **kwargs):
-        key = hash_args(args, kwargs)
-        if pool[key]:
-            resource = pool[key].pop()
-        else:
-            cm_instance = cm_factory(*args, **kwargs)
-            resource = await cm_instance.__aenter__()
-
-        yield resource
-
-        pool[key].append(resource)
-
-    return wrapper
 
 
 def find_conda_root():
