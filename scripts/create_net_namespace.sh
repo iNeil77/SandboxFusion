@@ -42,18 +42,27 @@ fi
 HOST_IP="${SUBNET}.1"
 NS_IP="${SUBNET}.2"
 
+# On any failure, clean up whatever was partially created so we don't leak
+# namespaces, veth pairs, or iptables rules.
+cleanup_on_failure() {
+    set +e
+    if $CREATE_BRIDGE; then
+        EXTERNAL_IFACE=$(ip route | grep default | awk '{print $5}')
+        [ -n "$EXTERNAL_IFACE" ] && \
+            sudo iptables -w -t nat -D POSTROUTING -s ${SUBNET}.0/24 -o $EXTERNAL_IFACE -j MASQUERADE 2>/dev/null
+        sudo ip link delete veth-$NAMESPACE-br 2>/dev/null
+    fi
+    sudo ip netns delete $NAMESPACE 2>/dev/null
+}
+trap cleanup_on_failure ERR
+
 # --- Create the network namespace ---
 sudo ip netns add $NAMESPACE
 
 if $CREATE_BRIDGE; then
-    # Create a virtual ethernet (veth) pair.
-    # veth-$NAMESPACE stays in the namespace; veth-$NAMESPACE-br stays on the host.
     sudo ip link add veth-$NAMESPACE type veth peer name veth-$NAMESPACE-br
-
-    # Move one end of the veth pair into the new namespace
     sudo ip link set veth-$NAMESPACE netns $NAMESPACE
 
-    # Configure IP addresses and bring up both ends of the veth pair
     sudo ip addr add $HOST_IP/24 dev veth-$NAMESPACE-br
     sudo ip link set veth-$NAMESPACE-br up
 
@@ -65,15 +74,12 @@ fi
 sudo ip netns exec $NAMESPACE ip link set lo up
 
 if $CREATE_BRIDGE; then
-    # --- Set up default route inside the namespace, pointing to the host ---
     sudo ip netns exec $NAMESPACE ip route add default via $HOST_IP
-
-    # --- Enable IP forwarding on the host so packets can be routed ---
     sudo sysctl -w net.ipv4.ip_forward=1
 
-    # --- Set up NAT (masquerading) so namespace traffic appears as host traffic ---
     EXTERNAL_IFACE=$(ip route | grep default | awk '{print $5}')
     sudo iptables -w -t nat -A POSTROUTING -s ${SUBNET}.0/24 -o $EXTERNAL_IFACE -j MASQUERADE
 fi
 
+trap - ERR
 echo "Namespace $NAMESPACE created with subnet ${SUBNET}.0/24"

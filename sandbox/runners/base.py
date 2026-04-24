@@ -55,7 +55,7 @@ async def run_command_bare(command: str | List[str],
                            timeout: float = 10,
                            stdin: Optional[str] = None,
                            cwd: Optional[str] = None,
-                           extra_env: Optional[Dict[str, str]] = {},
+                           extra_env: Optional[Dict[str, str]] = None,
                            use_exec: bool = False,
                            preexec_fn=None) -> CommandRunResult:
     """Execute a single command as a subprocess and return its result.
@@ -80,6 +80,7 @@ async def run_command_bare(command: str | List[str],
         A :class:`CommandRunResult` with status, timing, exit code, and
         captured stdout/stderr.
     """
+    p = None
     try:
         logger.debug(f'running command {command}')
         if use_exec:
@@ -118,27 +119,42 @@ async def run_command_bare(command: str | List[str],
                 p.stdin.close()
             except Exception as e:
                 logger.warning(f"Failed to close stdin: {e}")
+
         start_time = time.time()
+        timed_out = False
         try:
             await asyncio.wait_for(p.wait(), timeout=timeout)
-            execution_time = time.time() - start_time
-            logger.debug(f'stop running command {command}')
         except asyncio.TimeoutError:
+            timed_out = True
+
+        execution_time = time.time() - start_time
+
+        # Kill the entire process tree and reap zombies in a thread so the
+        # synchronous psutil.wait_procs() call doesn't block the event loop.
+        await asyncio.to_thread(kill_process_tree, p.pid)
+        # Ensure the asyncio child watcher also reaps the top-level process.
+        try:
+            await asyncio.wait_for(p.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            logger.warning('process not reaped after kill', pid=p.pid)
+
+        stdout = await get_output_non_blocking(p.stdout)
+        stderr = await get_output_non_blocking(p.stderr)
+
+        if timed_out:
             return CommandRunResult(status=CommandRunStatus.TimeLimitExceeded,
-                                    execution_time=time.time() - start_time,
-                                    stdout=await get_output_non_blocking(p.stdout),
-                                    stderr=await get_output_non_blocking(p.stderr))
-        finally:
-            if psutil.pid_exists(p.pid):
-                kill_process_tree(p.pid)
-                logger.info(f'process killed: {p.pid}')
+                                    execution_time=execution_time,
+                                    stdout=stdout,
+                                    stderr=stderr)
 
         return CommandRunResult(status=CommandRunStatus.Finished,
                                 execution_time=execution_time,
                                 return_code=p.returncode,
-                                stdout=await get_output_non_blocking(p.stdout),
-                                stderr=await get_output_non_blocking(p.stderr))
+                                stdout=stdout,
+                                stderr=stderr)
     except Exception as e:
+        if p is not None:
+            kill_process_tree(p.pid)  # sync is OK here; we're already failing
         message = f'exception on running command {command}: {e} | {traceback.print_tb(e.__traceback__)}'
         logger.warning(message)
         return CommandRunResult(status=CommandRunStatus.Error, stderr=message)
@@ -228,34 +244,59 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
         mem_limit = f'{args.memory_limit_MB}m' if args.memory_limit_MB > 0 else f'{config.sandbox.default_memory_limit_mb}m'
         cpu_limit = str(config.sandbox.default_cpu_limit)
         overhead = config.sandbox.docker_startup_overhead
-        docker_prefix = [
-            'docker', 'run', '--rm', '-i',
-            '--memory', mem_limit,
-            '--cpus', cpu_limit,
-            '--network', 'none',
-            '--pids-limit', '1024',
-            '-v', f'{cwd}:{cwd}',
-            '-w', cwd,
-        ]
-        if extra_env:
-            for k, v in extra_env.items():
-                docker_prefix += ['-e', f'{k}={v}']
-        docker_prefix.append(docker_image)
+        container_names = []
 
-        if compile_command is not None:
-            compile_res = await run_command_bare(
-                docker_prefix + ['bash', '-c', f'timeout {args.compile_timeout} bash -c {_shell_quote(compile_command)}'],
-                args.compile_timeout + overhead, None, cwd, extra_env, True)
-            if compile_res and compile_res.status == CommandRunStatus.Finished and compile_res.return_code == 124:
-                compile_res.status = CommandRunStatus.TimeLimitExceeded
-                compile_res.return_code = None
-        if compile_res is None or (compile_res.status == CommandRunStatus.Finished and compile_res.return_code == 0):
-            run_res = await run_command_bare(
-                docker_prefix + ['bash', '-c', f'timeout {args.run_timeout} bash -c {_shell_quote(run_command)}'],
-                args.run_timeout + overhead, args.stdin, cwd, extra_env, True)
-            if run_res and run_res.status == CommandRunStatus.Finished and run_res.return_code == 124:
-                run_res.status = CommandRunStatus.TimeLimitExceeded
-                run_res.return_code = None
+        def _make_docker_prefix():
+            import secrets as _sec
+            name = f'sandbox_{_sec.token_hex(8)}'
+            container_names.append(name)
+            return [
+                'docker', 'run', '--rm', '-i',
+                '--name', name,
+                '--memory', mem_limit,
+                '--cpus', cpu_limit,
+                '--network', 'none',
+                '--pids-limit', '1024',
+                '-v', f'{cwd}:{cwd}',
+                '-w', cwd,
+            ]
+
+        try:
+            if compile_command is not None:
+                docker_prefix = _make_docker_prefix()
+                if extra_env:
+                    for k, v in extra_env.items():
+                        docker_prefix += ['-e', f'{k}={v}']
+                docker_prefix.append(docker_image)
+                compile_res = await run_command_bare(
+                    docker_prefix + ['bash', '-c', f'timeout {args.compile_timeout} bash -c {_shell_quote(compile_command)}'],
+                    args.compile_timeout + overhead, None, cwd, extra_env, True)
+                if compile_res and compile_res.status == CommandRunStatus.Finished and compile_res.return_code == 124:
+                    compile_res.status = CommandRunStatus.TimeLimitExceeded
+                    compile_res.return_code = None
+            if compile_res is None or (compile_res.status == CommandRunStatus.Finished and compile_res.return_code == 0):
+                docker_prefix = _make_docker_prefix()
+                if extra_env:
+                    for k, v in extra_env.items():
+                        docker_prefix += ['-e', f'{k}={v}']
+                docker_prefix.append(docker_image)
+                run_res = await run_command_bare(
+                    docker_prefix + ['bash', '-c', f'timeout {args.run_timeout} bash -c {_shell_quote(run_command)}'],
+                    args.run_timeout + overhead, args.stdin, cwd, extra_env, True)
+                if run_res and run_res.status == CommandRunStatus.Finished and run_res.return_code == 124:
+                    run_res.status = CommandRunStatus.TimeLimitExceeded
+                    run_res.return_code = None
+        finally:
+            for name in container_names:
+                try:
+                    rm = await asyncio.create_subprocess_exec(
+                        'docker', 'rm', '-f', name,
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    await asyncio.wait_for(rm.wait(), timeout=10)
+                except Exception:
+                    logger.warning('failed to force-remove docker container', name=name)
 
         for filename in args.fetch_files:
             fp = os.path.abspath(os.path.join(cwd, filename))

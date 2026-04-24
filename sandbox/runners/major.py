@@ -29,6 +29,7 @@ environment once and cache the results for the lifetime of the process.
 and is merged into ``CODE_RUNNERS`` by :mod:`sandbox.runners`.
 """
 
+import asyncio
 import os
 import shutil
 import subprocess
@@ -74,6 +75,7 @@ def get_python_rt_env(env_name: str):
 
 
 __cpp_rt_flags = None
+__cpp_rt_flags_lock = asyncio.Lock()
 
 
 async def get_cpp_rt_flags():
@@ -83,6 +85,9 @@ async def get_cpp_rt_flags():
     C++ program.  Flags that produce a successful build are remembered and
     appended to all subsequent C++ compile commands.
 
+    Protected by an asyncio.Lock so concurrent C++ requests don't race on
+    the first-time detection.
+
     Returns:
         A list of flag strings that the host ``g++`` supports.
     """
@@ -90,20 +95,25 @@ async def get_cpp_rt_flags():
     if __cpp_rt_flags is not None:
         return __cpp_rt_flags
 
-    logger.info(f'checking available gcc flags...')
-    optional_flags = ['-lcrypto', '-lssl', '-lpthread']
-    with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
-        with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.cpp', delete=False) as f:
-            f.write('int main() {return 0;}')
+    async with __cpp_rt_flags_lock:
+        if __cpp_rt_flags is not None:
+            return __cpp_rt_flags
 
-        __cpp_rt_flags = []
-        for flag in optional_flags:
-            compile_res = await run_command_bare(f'g++ {f.name} -o test {flag}', cwd=tmp_dir)
-            if compile_res.status == CommandRunStatus.Finished and compile_res.return_code == 0:
-                __cpp_rt_flags.append(flag)
-                logger.info(f'flag {flag} added')
-            else:
-                logger.info(f'flag {flag} not available')
+        logger.info(f'checking available gcc flags...')
+        optional_flags = ['-lcrypto', '-lssl', '-lpthread']
+        detected = []
+        with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
+            with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.cpp', delete=False) as f:
+                f.write('int main() {return 0;}')
+
+            for flag in optional_flags:
+                compile_res = await run_command_bare(f'g++ {f.name} -o test {flag}', cwd=tmp_dir)
+                if compile_res.status == CommandRunStatus.Finished and compile_res.return_code == 0:
+                    detected.append(flag)
+                    logger.info(f'flag {flag} added')
+                else:
+                    logger.info(f'flag {flag} not available')
+        __cpp_rt_flags = detected
     return __cpp_rt_flags
 
 

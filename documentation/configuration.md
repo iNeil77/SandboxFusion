@@ -53,6 +53,7 @@ common:
 | `docker_image` | `string` | `"ineil77/sandbox-fusion-server:24042026-3"` | Docker image used when `isolation` is `"full"`. Must have all language runtimes installed. |
 | `default_memory_limit_mb` | `int` | `8192` | Default memory limit in megabytes for each sandbox execution. Overridden per-request by `memory_limit_MB` when > 0. |
 | `default_cpu_limit` | `float` | `2` | Default CPU core limit for each sandbox execution. In lite mode this sets the CFS quota; in full mode it maps to `docker run --cpus`. |
+| `docker_startup_overhead` | `float` | `10` | Extra seconds added to compile/run timeouts in full (Docker) mode to account for container startup latency. Not used in lite mode. |
 
 ### eval
 

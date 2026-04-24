@@ -32,13 +32,19 @@ if [ "$#" -eq 3 ]; then
     fi
 fi
 
+# Cleanup commands must not abort the script on failure — each resource
+# should be cleaned independently so one failure doesn't orphan the rest.
+set +e
+
 if $CLEAN_BRIDGE; then
     # --- Remove the NAT masquerade rule that was added during namespace creation ---
     EXTERNAL_IFACE=$(ip route | grep default | awk '{print $5}')
-    sudo iptables -w -t nat -D POSTROUTING -s ${SUBNET}.0/24 -o $EXTERNAL_IFACE -j MASQUERADE
+    if [ -n "$EXTERNAL_IFACE" ]; then
+        sudo iptables -w -t nat -D POSTROUTING -s ${SUBNET}.0/24 -o $EXTERNAL_IFACE -j MASQUERADE 2>/dev/null
+    fi
 fi
 
 # --- Delete the namespace (also destroys the associated veth pair) ---
-sudo ip netns delete $NAMESPACE
+sudo ip netns delete $NAMESPACE 2>/dev/null
 
 echo "Namespace $NAMESPACE cleaned up"

@@ -28,11 +28,11 @@ When a code execution request arrives, the sandbox:
 5. **Enters a PID namespace**: Uses `unshare` to give the sandbox process its own PID namespace, preventing it from seeing or signaling host processes.
 6. **Chroots** into the overlayfs mount: The sandbox process sees the overlayfs as its root filesystem, isolating it from the real filesystem.
 7. **Executes the code** within this isolated environment with the configured timeouts.
-8. **Tears down** the overlayfs, cgroup, and namespace after execution completes (or on timeout).
+8. **Tears down** the overlayfs (each unmount isolated so one failure cannot cascade, plus a `/proc/mounts` safety sweep), cgroup (killing all surviving processes and reaping zombies), and namespace (always returning the subnet to the pool) after execution completes (or on timeout).
 
 ### Requirements
 
-- **Linux**: overlayfs, cgroups v1, and namespaces are Linux kernel features.
+- **Linux**: overlayfs, cgroups v1/v2 (auto-detected), and namespaces are Linux kernel features.
 - **Root / privileged**: Setting up overlayfs and cgroups requires root privileges. When running inside Docker, the container must be started with `--privileged`.
 - **Network namespace scripts**: The scripts `scripts/create_net_namespace.sh` and `scripts/clean_net_namespace.sh` manage the network namespace lifecycle.
 
@@ -48,9 +48,9 @@ sandbox:
 
 The isolation primitives are implemented in `sandbox/runners/isolation.py`:
 
-- `tmp_overlayfs(lower_dirs)` -- Context manager that creates an overlayfs mount with the given lower directories (read-only) and a temporary upper directory (read-write).
-- `tmp_cgroup(memory_limit_mb)` -- Context manager that creates a cgroup with the specified memory limit and cleans it up on exit.
-- `tmp_netns()` -- Context manager that creates and destroys a network namespace.
+- `tmp_overlayfs()` -- Async context manager that creates an overlayfs mount with the host root (`/`) as the read-only lower layer and a tmpfs upper layer. Mounts `/proc`, `/sys`, and `/dev` inside the overlay. On teardown, each unmount is isolated in its own try/except, followed by a safety-net sweep of `/proc/mounts`. If setup fails partway through, all partial mounts are cleaned up before the exception propagates.
+- `tmp_cgroup(mem_limit, cpu_limit)` -- Async context manager that creates a cgroup (v1 or v2, auto-detected) with the specified limits. Cleanup is in a `finally` block that kills all contained processes and removes the cgroup. Cgroup v2 initialization is protected by a `threading.Lock` for thread safety.
+- `tmp_netns(no_bridge)` -- Async context manager that allocates a subnet from a thread-safe pool, creates a network namespace, and always returns the subnet in a `finally` block even if teardown fails. Raises `RuntimeError` after 60 seconds if no subnet is available.
 
 These are composed together in `sandbox/runners/base.py:run_commands()` when the isolation mode is `lite`.
 
@@ -66,14 +66,16 @@ When a code execution request arrives, the sandbox:
 
 1. **Launches a Docker container** from the configured `docker_image` (default: `ineil77/sandbox-fusion-server:24042026-3`) with these flags:
    - `--rm` -- Container is automatically removed after exit.
+   - `--name sandbox_<random_hex>` -- Unique container name for reliable force-removal on cleanup.
    - `--memory` -- Memory limit from the request or `sandbox.default_memory_limit_mb` (default 8192 MB).
    - `--cpus` -- CPU limit from `sandbox.default_cpu_limit` (default 2 cores).
    - `--network none` -- Complete network isolation (no egress traffic possible).
    - `--pids-limit 1024` -- Limits the number of processes/threads to prevent fork bombs. Set to 1024 to accommodate toolchains like Lean's LLVM linker that spawn many threads.
 2. **Mounts the temporary directory** containing the code and uploaded files into the container via `-v <workdir>:<workdir>`.
-3. **Executes the compile and run commands** inside the container.
-4. **Collects results** (stdout, stderr, exit code, fetched files) from the bind-mounted host directory.
-5. **The container is destroyed** automatically on exit (`--rm`).
+3. **Adds `docker_startup_overhead`** seconds (default 10) to timeouts to account for Docker startup latency separate from code execution time.
+4. **Executes the compile and run commands** inside the container (each in a separate container with its own unique name).
+5. **Collects results** (stdout, stderr, exit code, fetched files) from the bind-mounted host directory.
+6. **Force-removes all containers** via `docker rm -f` in a `finally` block, ensuring no leaked containers even on unexpected errors or interruptions.
 
 ### Requirements
 
@@ -144,7 +146,7 @@ docker run -d --rm --privileged \
 | **Network** | NAT-bridged outbound connectivity | Fully isolated (`--network none`) -- no egress traffic |
 | **File retrieval** | overlayfs captures all filesystem writes (absolute and relative paths) | Only files in the bind-mounted working directory survive; writes to absolute paths outside the workdir are lost |
 | **PID limit** | No hard limit (PID namespace via `unshare`) | `--pids-limit 1024` |
-| **Resource pooling** | overlayfs, cgroups, and netns are pooled via `@cached_context` for near-zero overhead on reuse | No pooling -- full Docker lifecycle on every execution |
+| **Resource pooling** | No pooling -- fresh overlayfs, cgroup, and netns created per execution (~100ms), torn down after | No pooling -- full Docker lifecycle on every execution |
 
 ---
 

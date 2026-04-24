@@ -50,12 +50,16 @@ def generate_random_string(length):
 
 
 def random_cgroup_name() -> str:
-    """Generate a random 6-character lowercase name for cgroup/namespace identifiers.
+    """Generate a random 16-character lowercase name for cgroup/namespace identifiers.
+
+    Uses ``secrets`` for cryptographic randomness. 26^16 ≈ 4.4 × 10^22
+    possible values, making birthday-paradox collisions negligible even
+    under very high concurrency.
 
     Returns:
-        A 6-character string of random lowercase ASCII letters.
+        A 16-character string of random lowercase ASCII letters.
     """
-    return ''.join(random.choice(string.ascii_lowercase) for _ in range(6))
+    return ''.join(secrets.choice(string.ascii_lowercase) for _ in range(16))
 
 
 def cached_context(cm_factory):

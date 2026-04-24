@@ -141,7 +141,7 @@ async def run_julia(args: CodeRunArgs) -> CodeRunResult:
 
 async def run_kotlin_script(args: CodeRunArgs) -> CodeRunResult:
     """Run Kotlin script code via the ``kotlin`` command."""
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+    with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         with tempfile.NamedTemporaryFile(mode='w', dir=tmp_dir, suffix='.kts', delete=False) as f:
             f.write(args.code)

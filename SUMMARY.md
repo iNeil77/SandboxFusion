@@ -37,7 +37,7 @@ SandboxFusion/
 │   │   ├── sandbox_client.py     #     run_code_in_sandbox() with retry logic
 │   │   ├── execution.py          #     Concurrency control, process tree management
 │   │   ├── extraction.py         #     Code block extraction from LLM completions
-│   │   ├── common.py             #     Random names, cached contexts, file helpers
+│   │   ├── common.py             #     Random names, file helpers
 │   │   ├── testing.py            #     Stdio test case execution (sequential + parallel)
 │   │   └── logging.py            #     structlog configuration
 │   ├── tests/                    #   pytest suite
@@ -152,6 +152,7 @@ Key config sections:
 - `sandbox.isolation`: `lite` | `full`
 - `sandbox.max_concurrency`: Limits simultaneous code executions
 - `sandbox.docker_image`: Docker image for `full` mode (default: `ineil77/sandbox-fusion-server:24042026-3`)
+- `sandbox.docker_startup_overhead`: Extra seconds added to timeouts in full mode for container startup (default: 10)
 - `eval.max_runner_concurrency`: Limits parallel test case runners (0 = unlimited)
 - `common.logging_color`: Colored structlog output
 
@@ -233,7 +234,7 @@ Client SDK ──HTTP──> Server Container :8080 ──subprocess──> Sand
 
 The `--privileged` flag is required because the server process needs root-level access to mount overlayfs, create cgroups, and manipulate network namespaces inside the container. No Docker socket mount is needed — the Docker daemon is not involved in code execution at all.
 
-This single-container architecture is what makes lite mode significantly faster than full mode: spawning a process with kernel namespace isolation (~5 ms pooled, ~100 ms cold) is an order of magnitude cheaper than asking the Docker daemon to create, start, and destroy a container (~500 ms+). The server process directly manages all isolation primitives via `sudo` subprocess calls, cutting out the Docker API entirely.
+This single-container architecture is what makes lite mode faster than full mode: spawning a process with kernel namespace isolation (~100 ms) is cheaper than asking the Docker daemon to create, start, and destroy a container (~500 ms+). The server process directly manages all isolation primitives via `sudo` subprocess calls, cutting out the Docker API entirely.
 
 **Per-execution lifecycle:**
 
@@ -262,7 +263,7 @@ This single-container architecture is what makes lite mode significantly faster 
 [cg_enter.sh|cgexec -g ...] [unshare --pid --fork --mount-proc] ip netns exec <ns> chroot <overlay> bash -c "cd <workdir> && <command>"
 ```
 
-**Teardown** unmounts dev/sys/proc/overlay/tmpfs in reverse order, deletes cgroup directories (killing any surviving PIDs), and tears down the network namespace. All cleanup uses `asyncio.create_task` for non-blocking parallel cleanup.
+**Teardown** unmounts dev/sys/proc/overlay/tmpfs in reverse order (each unmount isolated in its own try/except so one failure cannot cascade), runs a safety-net sweep of `/proc/mounts` to catch any remaining mounts, deletes cgroup directories (killing any surviving PIDs and reaping zombies via `psutil.wait_procs`), and tears down the network namespace. All cleanup is awaited inline to guarantee completion before returning.
 
 **Overhead:** ~100 ms per execution (mount + namespace creation).
 
@@ -364,6 +365,7 @@ Execution containers are **sibling containers** on the host Docker daemon, not n
 1. A `docker run` command is constructed with:
    - `--rm` — auto-remove container on exit
    - `-i` — keep stdin open for piping input to the process
+   - `--name sandbox_<random_hex>` — unique container name for reliable cleanup
    - `--memory <limit>` — default 8 GB (from `sandbox.default_memory_limit_mb`), overridden by `memory_limit_MB` from the request
    - `--cpus <limit>` — default 2 cores (from `sandbox.default_cpu_limit`)
    - `--network none` — complete network isolation (no veth, no bridge)
@@ -375,13 +377,17 @@ Execution containers are **sibling containers** on the host Docker daemon, not n
 
 3. The configured `docker_image` (from `sandbox.docker_image` in YAML) is appended, followed by `bash -c "<command>"`.
 
-4. For compiled languages, a compile container runs first; the run container is only spawned if compilation succeeds (exit code 0).
+4. `sandbox.docker_startup_overhead` seconds (default 10) are added to both compile and run timeouts to account for Docker container startup latency, which is not part of the user's code execution time.
 
-5. After execution, `fetch_files` are read from the bind-mounted host directory (they persist because the mount is a bind-mount, not a copy).
+5. For compiled languages, a compile container runs first (with its own unique name); the run container is only spawned if compilation succeeds (exit code 0).
+
+6. After execution, `fetch_files` are read from the bind-mounted host directory (they persist because the mount is a bind-mount, not a copy).
+
+7. In a `finally` block, all named containers are force-removed via `docker rm -f` to prevent leaked containers even if the process is interrupted.
 
 **Final command structure (full mode):**
 ```
-docker run --rm -i --memory 8192m --cpus 2 --network none --pids-limit 1024 -v /tmp/xyz:/tmp/xyz -w /tmp/xyz <image> bash -c "<command>"
+docker run --rm -i --name sandbox_a1b2c3d4 --memory 8192m --cpus 2 --network none --pids-limit 1024 -v /tmp/xyz:/tmp/xyz -w /tmp/xyz <image> bash -c "timeout <run_timeout> bash -c '<command>'"
 ```
 
 **Overhead:** ~500 ms+ per execution (Docker daemon overhead, image layer setup, container creation/teardown).
@@ -401,20 +407,20 @@ SandboxFusion is a single-process async server built on FastAPI + uvicorn + uvlo
 | Writing to subprocess stdin | `p.stdin.write()` + `await p.stdin.drain()` | `base.py:run_command_bare()` |
 | Reading subprocess output | `asyncio.wait_for(fd.read(...), timeout)` | `execution.py:get_output_non_blocking()` |
 | Isolation setup (mount, cgroup, netns) | `asyncio.create_subprocess_exec` for each `sudo` command | `isolation.py` |
-| Semaphore acquisition | `async with semaphore` | `execution.py:max_concurrency()` |
+| Semaphore acquisition | `async with semaphore` | `sandbox_api.py:run_code()` |
 | Filesystem cleanup | `asyncio.to_thread(shutil.rmtree, ...)` | `isolation.py:tmp_overlayfs()` |
 
-The event loop is **never blocked synchronously** during normal operation. All subprocess I/O, filesystem mounting, and network namespace operations are delegated to async subprocesses. The only synchronous operations are fast local filesystem calls (`os.makedirs`, `os.symlink`, `open()` for writing source files to tmpdir) and the one-time cgroup v2 initialization (`_init_cgroup_v2_delegation` runs `subprocess.run` at startup).
+The event loop is **never blocked synchronously** during normal operation. All subprocess I/O, filesystem mounting, network namespace operations, and process tree killing (`kill_process_tree` is dispatched via `asyncio.to_thread`) are delegated to async subprocesses or thread pools. The only synchronous operations are fast local filesystem calls (`os.makedirs`, `os.symlink`, `open()` for writing source files to tmpdir) and the one-time cgroup v2 initialization (`_init_cgroup_v2_delegation` runs `subprocess.run` at startup, protected by a `threading.Lock`).
 
-### Resource Pooling via `cached_context`
+### Resource Lifecycle (No Pooling)
 
-The `@cached_context` decorator (in `common.py`) on `tmp_cgroup()`, `tmp_netns()`, and `tmp_overlayfs()` implements **object pooling**: instead of creating and tearing down an overlayfs mount, cgroup, or network namespace for every execution, resources are returned to a pool keyed by their constructor arguments. When a new execution starts with the same parameters, a pooled resource is reused.
+Each code execution creates and destroys its own overlayfs mount, cgroup, and network namespace. There is no resource pooling — every execution gets a fresh isolation envelope and tears it down completely on exit. This eliminates a class of resource leaks that previously occurred when pooled resources were not properly cleaned up, at the cost of ~100ms setup overhead per execution in lite mode.
 
-- **Cgroups** with `(mem_limit='4G', cpu_limit=1)` — the most common call — are reused across requests. New cgroups are only created when all pooled ones are in use.
-- **Network namespaces** with `(no_bridge=False)` are similarly pooled.
-- **Overlayfs mounts** are also pooled — the tmpfs upper layer is reused (writes from previous executions are ephemeral but the mount structure persists).
+- **Overlayfs** mounts are created with a tmpfs upper layer, then fully unmounted and deleted after execution.
+- **Cgroups** are created per-execution with the requested memory/CPU limits, and all contained processes are killed before the cgroup is removed.
+- **Network namespaces** are allocated from a thread-safe subnet pool (protected by `threading.Lock`), and always returned to the pool in a `finally` block even if namespace teardown fails.
 
-The pool grows to accommodate peak concurrency and then stabilizes. This reduces per-request overhead from ~100ms (full setup) to near-zero (pool hit) under sustained load. This pooling is a major reason lite mode significantly outperforms full mode at steady-state throughput — full mode pays the ~500ms Docker lifecycle cost on every single request with no pooling.
+Subnet pool exhaustion is bounded by a 60-second timeout — if no subnet becomes available within that window, the request fails with `RuntimeError` rather than blocking indefinitely.
 
 ### Concurrency Control Layers
 
@@ -451,11 +457,11 @@ Incoming HTTP Request
 
 | Layer | Mechanism | Config | Default |
 |-------|-----------|--------|---------|
-| **Sandbox execution** | `asyncio.Semaphore` in `@max_concurrency` decorator | `sandbox.max_concurrency` | 34 |
+| **Sandbox execution** | `asyncio.Semaphore` in `sandbox_api.py:run_code()` | `sandbox.max_concurrency` | 34 |
 | **Eval test runners** | `asyncio.Semaphore` applied dynamically | `eval.max_runner_concurrency` | 3 (local), 0=unlimited (CI) |
 | **Network namespaces** | Pool of 4,096 subnets (lite mode only) | Hardcoded | 4,096 concurrent |
 
-**Important:** The `max_concurrency` semaphore gates `run_commands()` and language-specific runners, not the HTTP handler itself. For `/submit`, each test case independently acquires the `max_runner_concurrency` semaphore, and the inner `run_code_in_sandbox()` call then contends for the `max_concurrency` semaphore. This means a single `/submit` request with 100 test cases can occupy up to `min(max_runner_concurrency, max_concurrency)` sandbox slots simultaneously.
+**Important:** The `max_concurrency` semaphore gates the `run_code()` HTTP handler (wrapping the runner dispatch), not individual subprocess calls. For `/submit`, each test case independently acquires the `max_runner_concurrency` semaphore, and the inner `run_code_in_sandbox()` call then contends for the `max_concurrency` semaphore. This means a single `/submit` request with 100 test cases can occupy up to `min(max_runner_concurrency, max_concurrency)` sandbox slots simultaneously.
 
 **SDK has zero concurrency control.** Neither the sync nor async client implements any client-side rate limiting, connection pooling caps, or backpressure. If you fire 1,000 `asyncio.gather(run_code(...))` calls, the SDK opens 1,000 HTTP connections to the server simultaneously. The server accepts all of them (uvicorn has no connection limit by default), and all 1,000 requests queue behind the `max_concurrency` semaphore. Only 34 execute at a time; the other 966 hold open connections and await their semaphore turn.
 
@@ -479,11 +485,10 @@ results = await asyncio.gather(*[rate_limited_run(r) for r in requests])
 
 1. All 34 requests enter the event loop simultaneously.
 2. Each acquires the `max_concurrency` semaphore (34 slots — all proceed).
-3. Each checks the `cached_context` pool for an overlayfs, cgroup, and netns.
-4. On first burst: 34 overlayfs mounts, 34 cgroups, and 34 network namespaces are created in parallel (each creation is ~3-5 `sudo` subprocess calls, all async — while execution A waits for `sudo mount` to return, execution B's `sudo cgcreate` is already running).
-5. The 34 compile/run subprocesses execute concurrently, each in its own isolation envelope.
-6. As each completes, its overlay/cgroup/netns return to the pool.
-7. Request #35 arrives — it awaits the semaphore briefly, then gets a pooled overlay/cgroup/netns with zero setup overhead.
+3. Each creates a fresh overlayfs mount, cgroup, and network namespace in parallel (each creation is ~3-5 `sudo` subprocess calls, all async — while execution A waits for `sudo mount` to return, execution B's `sudo cgcreate` is already running).
+4. The 34 compile/run subprocesses execute concurrently, each in its own isolation envelope.
+5. As each completes, its overlay/cgroup/netns are torn down and resources released.
+6. Request #35 arrives — it awaits the semaphore briefly, then creates fresh isolation resources (~100ms setup).
 
 **Full mode — 34 concurrent requests:**
 
@@ -524,23 +529,22 @@ With `max_runner_concurrency=3` (local default): at most 3 test cases execute si
 |-------|-----------|-----------|
 | HTTP parsing (FastAPI) | <1ms | <1ms |
 | Semaphore acquisition | 0ms (if under limit) | 0ms (if under limit) |
-| Isolation setup | ~5ms (pooled) / ~100ms (cold) | ~500ms (Docker startup) |
+| Isolation setup | ~100ms (overlayfs + cgroup + netns) | ~500ms (Docker startup) |
 | Source file write | <1ms | <1ms |
 | Compile (if needed) | Language-dependent | Language-dependent |
 | Run | Language-dependent | Language-dependent |
 | Output capture | <1ms | <1ms |
-| Isolation teardown | ~0ms (returned to pool) | ~100ms (Docker --rm) |
+| Isolation teardown | ~50ms (unmount + cgroup + netns cleanup) | ~100ms (Docker --rm) |
 | HTTP response | <1ms | <1ms |
 
 ### Throughput Comparison at Scale
 
 | Metric | Lite (34 concurrent) | Full (34 concurrent) |
 |--------|---------------------|---------------------|
-| Sustained throughput (simple Python) | ~300 req/s (10ms exec + 5ms overhead) | ~60 req/s (10ms exec + 500ms overhead) |
-| Cold start burst | ~100ms setup x 34 ~ 200ms wall | ~500ms setup x 34 ~ 800ms wall |
-| Warm burst (pooled resources) | ~5ms overhead per request | ~500ms overhead per request (no pooling) |
+| Sustained throughput (simple Python) | ~90 req/s (10ms exec + ~100ms overhead) | ~60 req/s (10ms exec + 500ms overhead) |
+| Burst (34 concurrent) | ~100ms setup x 34 ~ 200ms wall | ~500ms setup x 34 ~ 800ms wall |
 | Memory at peak (worst case) | 34 x 8GB cgroup limit + overlayfs tmpfs | 34 x 8GB Docker limit |
-| Isolation teardown overlap | Pool-returned, near-zero | Docker daemon queues --rm cleanup |
+| Isolation teardown | ~50ms (unmount, cgroup kill, netns cleanup) | Docker daemon queues --rm cleanup |
 
 ### Bottleneck Analysis for High-Load Scenarios
 

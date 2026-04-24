@@ -48,11 +48,11 @@ def try_decode(s: bytes) -> str:
 
 
 async def get_output_non_blocking(fd):
-    """Read available data from an async stream without blocking.
+    """Read available data from an async stream.
 
     Attempts to read up to 1 MB from the given async file descriptor with a
-    near-zero timeout (0.1 ms). If no data is available within the timeout,
-    returns an empty string.
+    5-second timeout.  This is called after the process has already exited or
+    been killed, so the read should complete quickly once pipe buffers flush.
 
     Args:
         fd: An async stream object supporting ``read(n)`` (e.g., an
@@ -62,21 +62,22 @@ async def get_output_non_blocking(fd):
         The decoded string content read from the stream, or an empty string
         if nothing was available.
     """
+    if fd is None:
+        return ''
     res = b''
     try:
-        # read up to 1MB
-        res = await asyncio.wait_for(fd.read(1024 * 1024), timeout=0.0001)
-    except asyncio.TimeoutError:
+        res = await asyncio.wait_for(fd.read(1024 * 1024), timeout=5)
+    except (asyncio.TimeoutError, OSError):
         pass
     return try_decode(res)
 
 
 def kill_process_tree(pid):
-    """Kill a process and all of its descendant processes.
+    """Kill a process and all of its descendant processes, then reap zombies.
 
     Uses ``psutil`` to recursively discover all child processes of the given
-    PID, kills them first, then kills the parent. Logs a warning if any
-    error occurs (e.g., if the process has already exited).
+    PID, sends SIGKILL to each, then waits for them to exit so they don't
+    linger as zombies in the process table.
 
     Args:
         pid: The process ID of the root process to kill.
@@ -84,11 +85,20 @@ def kill_process_tree(pid):
     try:
         parent = psutil.Process(pid)
         children = parent.children(recursive=True)
-        for child in children:
-            child.kill()
-        parent.kill()
-    except Exception as e:
-        logger.warn(f'error on killing process tree: {e}')
+    except (psutil.NoSuchProcess, psutil.AccessDenied):
+        return
+
+    procs = children + [parent]
+    for p in procs:
+        try:
+            p.kill()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    # Reap all killed processes so they don't remain as zombies.
+    _, alive = psutil.wait_procs(procs, timeout=5)
+    for p in alive:
+        logger.warning('process still alive after SIGKILL+wait', pid=p.pid)
 
 
 @cache
@@ -118,7 +128,8 @@ def get_memory_nodes() -> str:
         A string representing the available memory node set (e.g., ``'0'``
         or ``'0-3'``).
     """
-    return open('/sys/fs/cgroup/cpuset/cpuset.mems').read().strip()
+    with open('/sys/fs/cgroup/cpuset/cpuset.mems') as f:
+        return f.read().strip()
 
 
 T = TypeVar('T', bound=Callable[..., Coroutine[Any, Any, Any]])

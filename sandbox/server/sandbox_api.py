@@ -21,6 +21,7 @@ compilation and execution results along with an overall status
 (Success, Failed, or SandboxError).
 """
 
+import asyncio
 import os
 import traceback
 from enum import Enum
@@ -30,6 +31,7 @@ import structlog
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
+from sandbox.configs.run_config import RunConfig
 from sandbox.runners import (
     CODE_RUNNERS,
     CodeRunArgs,
@@ -41,6 +43,21 @@ from sandbox.runners import (
 
 sandbox_router = APIRouter()
 logger = structlog.stdlib.get_logger()
+
+_sandbox_config = RunConfig.get_instance_sync().sandbox
+_run_code_semaphore: Optional[asyncio.Semaphore] = None
+
+
+def _get_run_code_semaphore() -> Optional[asyncio.Semaphore]:
+    """Lazily create the concurrency semaphore on first use.
+
+    Deferred to first request so the semaphore is bound to the running
+    event loop rather than created at module-import time.
+    """
+    global _run_code_semaphore
+    if _run_code_semaphore is None and _sandbox_config.max_concurrency > 0:
+        _run_code_semaphore = asyncio.Semaphore(_sandbox_config.max_concurrency)
+    return _run_code_semaphore
 
 
 class RunCodeRequest(BaseModel):
@@ -175,6 +192,9 @@ async def run_code(request: RunCodeRequest):
     :class:`RunCodeResponse`, and catches any unexpected exceptions as a
     :attr:`RunStatus.SandboxError`.
 
+    Concurrent executions are bounded by ``sandbox.max_concurrency`` from
+    the YAML configuration.
+
     Args:
         request: Validated request payload.
 
@@ -187,7 +207,12 @@ async def run_code(request: RunCodeRequest):
         logger.debug(
             f'start processing {request.language} request with code ```\n{request.code[:100]}\n``` and files {list(request.files.keys())}...(memory_limit: {request.memory_limit_MB}MB)'
         )
-        result = await CODE_RUNNERS[request.language](CodeRunArgs(**request.model_dump()))
+        sem = _get_run_code_semaphore()
+        if sem is not None:
+            async with sem:
+                result = await CODE_RUNNERS[request.language](CodeRunArgs(**request.model_dump()))
+        else:
+            result = await CODE_RUNNERS[request.language](CodeRunArgs(**request.model_dump()))
 
         resp.compile_result = result.compile_result
         resp.run_result = result.run_result

@@ -36,6 +36,7 @@ import os
 import shutil
 import stat
 import sys
+import threading
 import time
 from contextlib import asynccontextmanager
 from typing import List, Optional
@@ -44,7 +45,7 @@ import aiofiles
 import aiofiles.os
 import structlog
 
-from sandbox.utils.common import cached_context, random_cgroup_name
+from sandbox.utils.common import random_cgroup_name
 
 logger = structlog.stdlib.get_logger()
 
@@ -65,6 +66,7 @@ def _detect_cgroup_version() -> int:
 CGROUP_VERSION = _detect_cgroup_version()
 
 _cgroup_v2_initialized = False
+_cgroup_v2_lock = threading.Lock()
 
 
 def _init_cgroup_v2_delegation():
@@ -74,28 +76,33 @@ def _init_cgroup_v2_delegation():
     enabling subtree_control.  We move ALL processes into an ``init``
     child cgroup first, then enable the controllers.  This is idempotent
     and uses subprocess calls to ensure root privileges via sudo.
+
+    Protected by a lock to prevent concurrent first-time callers from
+    racing on the cgroup filesystem writes.
     """
     global _cgroup_v2_initialized
     if _cgroup_v2_initialized:
         return
-    try:
-        import subprocess
-        init_cg = '/sys/fs/cgroup/sandbox_init'
-        subprocess.run(['sudo', 'mkdir', '-p', init_cg], check=True)
-        # Move all root-cgroup processes into the init child
-        with open('/sys/fs/cgroup/cgroup.procs') as f:
-            pids = f.read().splitlines()
-        for pid in pids:
-            if pid.strip():
-                subprocess.run(
-                    ['sudo', 'bash', '-c', f'echo {pid.strip()} > {init_cg}/cgroup.procs'],
-                    check=False)
-        subprocess.run(
-            ['sudo', 'bash', '-c', 'echo "+memory +cpu" > /sys/fs/cgroup/cgroup.subtree_control'],
-            check=True)
-        _cgroup_v2_initialized = True
-    except Exception as e:
-        logger.warning(f'Failed to initialize cgroup v2 delegation: {e}')
+    with _cgroup_v2_lock:
+        if _cgroup_v2_initialized:
+            return
+        try:
+            import subprocess
+            init_cg = '/sys/fs/cgroup/sandbox_init'
+            subprocess.run(['sudo', 'mkdir', '-p', init_cg], check=True)
+            with open('/sys/fs/cgroup/cgroup.procs') as f:
+                pids = f.read().splitlines()
+            for pid in pids:
+                if pid.strip():
+                    subprocess.run(
+                        ['sudo', 'bash', '-c', f'echo {pid.strip()} > {init_cg}/cgroup.procs'],
+                        check=False)
+            subprocess.run(
+                ['sudo', 'bash', '-c', 'echo "+memory +cpu" > /sys/fs/cgroup/cgroup.subtree_control'],
+                check=True)
+            _cgroup_v2_initialized = True
+        except Exception as e:
+            logger.warning(f'Failed to initialize cgroup v2 delegation: {e}')
 
 
 async def execute_command(cmd: List[str], raise_nonzero: bool = True):
@@ -119,10 +126,52 @@ async def mount_tmpfs(mount_point: str):
     await execute_command(mount_cmd)
 
 
-async def unmount_fs(mount_point: str):
-    """Lazily unmount the filesystem at *mount_point* (requires sudo)."""
-    mount_cmd = ['sudo', 'umount', '-l', mount_point]
+async def unmount_fs(mount_point: str, recursive: bool = False):
+    """Lazily unmount the filesystem at *mount_point* (requires sudo).
+
+    Args:
+        mount_point: Path to unmount.
+        recursive: If True, pass ``-R`` to also detach all submounts
+            (needed for ``--rbind`` mounts like ``/dev``).
+    """
+    flags = ['-Rl'] if recursive else ['-l']
+    mount_cmd = ['sudo', 'umount'] + flags + [mount_point]
     await execute_command(mount_cmd)
+
+
+async def _sweep_remaining_mounts(base_dir: str):
+    """Force-detach any mounts still present under *base_dir*.
+
+    Reads ``/proc/mounts`` to discover leftover mount points (deepest first)
+    and issues ``umount -Rl`` for each.  Errors are logged but never raised,
+    since this is a last-resort safety net.
+    """
+    try:
+        mounts = await asyncio.to_thread(_read_mounts_under, base_dir)
+        for mp in mounts:
+            try:
+                await execute_command(['sudo', 'umount', '-Rl', mp])
+            except Exception:
+                logger.warning('sweep unmount failed', mount_point=mp)
+    except Exception:
+        logger.warning('sweep mount enumeration failed', base_dir=base_dir)
+
+
+def _read_mounts_under(base_dir: str) -> list:
+    """Return mount points under *base_dir*, deepest first."""
+    result = []
+    try:
+        with open('/proc/mounts') as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) >= 2:
+                    mp = parts[1]
+                    if mp == base_dir or mp.startswith(base_dir + '/'):
+                        result.append(mp)
+    except OSError:
+        pass
+    result.sort(key=len, reverse=True)
+    return result
 
 
 @asynccontextmanager
@@ -146,33 +195,55 @@ async def tmp_overlayfs():
     tmpfs_dir = f'{base_dir}/tmpfs'
     upper_dir = f'{tmpfs_dir}/upper'
     work_dir = f'{tmpfs_dir}/work'
-    for sub_dir in [tmpfs_dir, merged_dir]:
-        await aiofiles.os.makedirs(sub_dir)
-    # overlayfs requires work and upper dir to be non-overlayfs, see https://stackoverflow.com/questions/67198603/overlayfs-inside-docker-container
-    await mount_tmpfs(tmpfs_dir)
-    for sub_dir in [upper_dir, work_dir]:
-        await aiofiles.os.makedirs(sub_dir)
 
-    mount_cmd = [
-        'sudo', 'mount', '-t', 'overlay', 'overlay', '-o', f'lowerdir=/,upperdir={upper_dir},workdir={work_dir}',
-        merged_dir
-    ]
-    await execute_command(mount_cmd)
-    await execute_command(['sudo', 'mount', '-t', 'proc', '/proc', f'{merged_dir}/proc'])
-    await execute_command(['sudo', 'mount', '-t', 'sysfs', '/sys', f'{merged_dir}/sys'])
-    await execute_command(['sudo', 'mount', '--rbind', '/dev', f'{merged_dir}/dev'])
-    await execute_command(['cp', '/etc/hosts', f'{merged_dir}/etc/'])
-    await execute_command(['cp', '/etc/resolv.conf', f'{merged_dir}/etc/'])
+    try:
+        for sub_dir in [tmpfs_dir, merged_dir]:
+            await aiofiles.os.makedirs(sub_dir)
+        await mount_tmpfs(tmpfs_dir)
+        for sub_dir in [upper_dir, work_dir]:
+            await aiofiles.os.makedirs(sub_dir)
+
+        mount_cmd = [
+            'sudo', 'mount', '-t', 'overlay', 'overlay', '-o',
+            f'lowerdir=/,upperdir={upper_dir},workdir={work_dir}', merged_dir
+        ]
+        await execute_command(mount_cmd)
+        await execute_command(['sudo', 'mount', '-t', 'proc', '/proc', f'{merged_dir}/proc'])
+        await execute_command(['sudo', 'mount', '-t', 'sysfs', '/sys', f'{merged_dir}/sys'])
+        await execute_command(['sudo', 'mount', '--rbind', '/dev', f'{merged_dir}/dev'])
+        await execute_command(['cp', '/etc/hosts', f'{merged_dir}/etc/'])
+        await execute_command(['cp', '/etc/resolv.conf', f'{merged_dir}/etc/'])
+    except BaseException:
+        await _sweep_remaining_mounts(base_dir)
+        try:
+            await asyncio.to_thread(shutil.rmtree, base_dir)
+        except Exception:
+            pass
+        raise
 
     yield merged_dir
 
-    # TODO: cleanup errors shouldn't interrupt other cleanups
-    await unmount_fs(f'{merged_dir}/dev')
-    await unmount_fs(f'{merged_dir}/sys')
-    await unmount_fs(f'{merged_dir}/proc')
-    await unmount_fs(merged_dir)
-    await unmount_fs(tmpfs_dir)
-    await asyncio.to_thread(shutil.rmtree, base_dir)
+    # Each unmount is isolated so one failure cannot skip the rest.
+    # /dev uses recursive unmount because --rbind creates submounts.
+    for mp, recursive in [
+        (f'{merged_dir}/dev', True),
+        (f'{merged_dir}/sys', False),
+        (f'{merged_dir}/proc', False),
+        (merged_dir, False),
+        (tmpfs_dir, False),
+    ]:
+        try:
+            await unmount_fs(mp, recursive=recursive)
+        except Exception:
+            logger.warning('unmount failed, will retry in sweep', mount_point=mp)
+
+    # Safety-net: enumerate any remaining mounts under base_dir and force-detach them.
+    await _sweep_remaining_mounts(base_dir)
+
+    try:
+        await asyncio.to_thread(shutil.rmtree, base_dir)
+    except Exception:
+        logger.warning('rmtree failed for overlay dir', path=base_dir)
 
 
 async def _cleanup_group_v1(cg):
@@ -221,7 +292,6 @@ def _parse_mem_limit(mem_limit: str) -> int:
     return int(mem_limit)
 
 
-@cached_context
 @asynccontextmanager
 async def tmp_cgroup(mem_limit: Optional[str] = None, cpu_limit: Optional[float] = None):
     """Async context manager that creates temporary cgroup controllers.
@@ -263,13 +333,14 @@ async def tmp_cgroup(mem_limit: Optional[str] = None, cpu_limit: Optional[float]
             f.write(f'#!/bin/bash\necho $$ > {cg_path}/cgroup.procs\nexec "$@"\n')
         os.chmod(wrapper, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
 
-        yield [wrapper]
-
-        asyncio.create_task(_cleanup_group_v2(cg_path))
         try:
-            os.unlink(wrapper)
-        except OSError:
-            pass
+            yield [wrapper]
+        finally:
+            await _cleanup_group_v2(cg_path)
+            try:
+                os.unlink(wrapper)
+            except OSError:
+                pass
     else:
         groups = []
 
@@ -286,62 +357,71 @@ async def tmp_cgroup(mem_limit: Optional[str] = None, cpu_limit: Optional[float]
             await execute_command(['sudo', 'cgset', '-r', f'cpu.cfs_period_us=100000', cpu_group_name])
             groups.append(f'cpu:{cpu_group_name}')
 
-        yield groups
-
-        for cg in groups:
-            asyncio.create_task(_cleanup_group_v1(cg))
+        try:
+            yield groups
+        finally:
+            for cg in groups:
+                await _cleanup_group_v1(cg)
 
 
 # Pool of /24 subnets in the 172.16.0.0/12 private range, used by
 # :func:`tmp_netns` to assign unique subnet addresses to each network
 # namespace.  When running under ``pytest-xdist``, the pool is partitioned by
 # worker ID so that parallel workers never allocate overlapping subnets.
-available_subnets = []
+#
+# Access is protected by ``_subnet_lock`` to prevent races between concurrent
+# async requests popping/appending on the same list.
+_available_subnets: list = []
+_subnet_lock = threading.Lock()
 pytest_worker_id = os.environ.get("PYTEST_XDIST_WORKER")
 if pytest_worker_id is not None:
-    # pytest with multi-worker will cause conflicting ip subnet range
     for j in range(0, 256):
-        available_subnets.append(f"172.{16 + int(pytest_worker_id[2:])}.{j}")
+        _available_subnets.append(f"172.{16 + int(pytest_worker_id[2:])}.{j}")
 else:
-    for i in range(16, 32):  # 172.16.x.x to 172.31.x.x
-        for j in range(0, 256):  # 172.x.0.x to 172.x.255.x
-            available_subnets.append(f"172.{i}.{j}")
+    for i in range(16, 32):
+        for j in range(0, 256):
+            _available_subnets.append(f"172.{i}.{j}")
 create_netns_script = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../scripts/create_net_namespace.sh'))
 clean_netns_script = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../scripts/clean_net_namespace.sh'))
 
 
-# https://www.reddit.com/r/ProgrammerHumor/comments/8mdcde/the_utimate_dhcp_server/
 def get_subnet_ip_rfc_2322():
-    """Pop and return a subnet prefix from the available pool.
+    """Pop and return a subnet prefix from the available pool (thread-safe).
 
     Returns:
         A subnet prefix string (e.g. ``'172.16.0'``), or ``None`` if the pool
         is exhausted.
     """
-    if len(available_subnets) == 0:
-        logger.warning('all subnet ip used up')
-        return None
-    return available_subnets.pop()
+    with _subnet_lock:
+        if not _available_subnets:
+            return None
+        return _available_subnets.pop()
 
 
 def return_subnet_ip_rfc_2322(ip):
-    """Return a previously allocated subnet prefix back to the pool.
+    """Return a previously allocated subnet prefix back to the pool (thread-safe).
 
     Args:
         ip: Subnet prefix string to return (e.g. ``'172.16.0'``).
     """
-    available_subnets.append(ip)
+    with _subnet_lock:
+        _available_subnets.append(ip)
 
 
-@cached_context
+_SUBNET_ACQUIRE_TIMEOUT = 60
+
+
 @asynccontextmanager
 async def tmp_netns(no_bridge: bool = False):
-    """Async context manager (cached) that creates a temporary network namespace.
+    """Async context manager that creates a temporary network namespace.
 
-    A unique subnet is allocated from :data:`available_subnets` and passed to
-    the ``create_net_namespace.sh`` helper script.  On exit the namespace is
-    torn down by ``clean_net_namespace.sh`` and the subnet is returned to the
-    pool.
+    A unique subnet is allocated from the pool and passed to the
+    ``create_net_namespace.sh`` helper script.  On exit the namespace is
+    torn down by ``clean_net_namespace.sh`` and the subnet is returned to
+    the pool.
+
+    Raises ``RuntimeError`` if no subnet becomes available within
+    ``_SUBNET_ACQUIRE_TIMEOUT`` seconds.
 
     Args:
         no_bridge: If True, the ``--no-bridge`` flag is passed to the creation
@@ -352,18 +432,27 @@ async def tmp_netns(no_bridge: bool = False):
         The name of the newly created network namespace.
     """
     net_ns_name = random_cgroup_name()
+    deadline = time.monotonic() + _SUBNET_ACQUIRE_TIMEOUT
     while True:
         subnet_ip = get_subnet_ip_rfc_2322()
         if subnet_ip is not None:
             break
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                f'subnet pool exhausted: no subnet available after {_SUBNET_ACQUIRE_TIMEOUT}s')
         await asyncio.sleep(0.5)
     args = [net_ns_name, subnet_ip]
     if no_bridge:
         args += ['--no-bridge']
     await execute_command(['sudo', create_netns_script] + args)
-    yield net_ns_name
-    await execute_command(['sudo', clean_netns_script] + args)
-    return_subnet_ip_rfc_2322(subnet_ip)
+    try:
+        yield net_ns_name
+    finally:
+        try:
+            await execute_command(['sudo', clean_netns_script] + args)
+        except Exception:
+            logger.warning('netns cleanup failed', netns=net_ns_name)
+        return_subnet_ip_rfc_2322(subnet_ip)
 
 
 async def main():
