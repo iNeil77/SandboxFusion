@@ -14,8 +14,7 @@
 
 """FastAPI application entry point for the SandboxFusion server.
 
-Creates the main FastAPI application, conditionally mounts static file
-directories for the interactive playground (sandbox/pages/) and the
+Creates the main FastAPI application, conditionally mounts the static
 documentation site (docs/build/), registers API routers for sandbox
 execution and evaluation submission, and installs a global exception
 handler that returns JSON-formatted tracebacks.
@@ -38,10 +37,6 @@ logger = structlog.stdlib.get_logger()
 
 app = FastAPI()
 
-playground_dir = os.path.abspath(os.path.join(__file__, '../../pages'))
-if os.path.isdir(playground_dir):
-    app.mount('/playground', StaticFiles(directory=playground_dir, html=True), name='playground')
-
 docs_dir = os.path.abspath(os.path.join(__file__, '../../../docs/build'))
 if os.path.isdir(docs_dir):
     app.mount('/SandboxFusion', StaticFiles(directory=docs_dir, html=True), name='doc-site')
@@ -49,7 +44,7 @@ if os.path.isdir(docs_dir):
 
 @app.get("/", response_class=HTMLResponse)
 async def root():
-    """Serve a client-side redirect to the ``/SandboxFusion`` documentation site.
+    """Redirect to the ``/SandboxFusion`` documentation site.
 
     Returns an HTML page whose inline JavaScript computes the correct
     documentation URL relative to the current origin.  For deployments on
@@ -76,7 +71,7 @@ async def root():
     </script>
 </head>
 <body>
-    <p>Redirecting to the playground...</p>
+    <p>Redirecting to the documentation...</p>
 </body>
 </html>
     '''

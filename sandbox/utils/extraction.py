@@ -792,15 +792,14 @@ def trim_till_first_function(code, language):
 
 
 def find_java_public_class_name(java_code: str) -> str:
-    """
-    Finds and returns the name of the public class in a given Java source code string.
-    If no public class is found, returns None.
+    """Find the name of the public class in a Java source code string.
 
     Args:
-    java_code (str): A string containing Java source code.
+        java_code: A string containing Java source code.
 
     Returns:
-    str or None: The name of the public class if found, otherwise None.
+        The name of the public class if found, or ``None`` if no public
+        class declaration is present.
     """
     pattern = r'\bpublic\s+(abstract\s+|final\s+)?class\s+(\w+)'
     match = re.search(pattern, java_code)
@@ -811,15 +810,19 @@ def find_java_public_class_name(java_code: str) -> str:
 
 
 def find_inner_function_body(signature_pattern: str, completion: str) -> Optional[Tuple[int, int]]:
-    """
-    Finds inner function body inside some class/namespace block.
-    Used for language like: c#, java, etc.
+    """Find the start and end indices of a function body inside a class block.
+
+    Uses bracket counting to locate the matching closing brace after the
+    function signature. Used for languages like C# and Java.
 
     Args:
-    signature_pattern (str): Function signature pattern, includes the left curly brackets, used to find the starting position of function.
+        signature_pattern: Regex pattern matching the function signature up to
+            and including the opening ``{``.
+        completion: The source code string to search.
 
     Returns:
-    Tuple[int, int] or None: The function body indices if exists, otherwise None.
+        A ``(start, end)`` tuple of character indices spanning the full
+        function (signature through closing brace), or ``None`` if no match.
     """
     matches = re.search(signature_pattern, completion, re.DOTALL | re.MULTILINE)
     if matches is None:

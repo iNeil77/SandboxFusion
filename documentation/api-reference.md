@@ -6,7 +6,7 @@ SandboxFusion exposes four HTTP endpoints. The server runs on FastAPI and listen
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/` | Redirects to the documentation/playground page |
+| `GET` | `/` | Redirects to the documentation site |
 | `GET` | `/v1/ping` | Health check |
 | `POST` | `/run_code` | Execute code in any supported language |
 | `POST` | `/submit` | Evaluate a completion against inline test cases |
@@ -15,7 +15,7 @@ SandboxFusion exposes four HTTP endpoints. The server runs on FastAPI and listen
 
 ## GET /
 
-Redirects to the static playground page. Not intended for programmatic use.
+Redirects to the static documentation site. Not intended for programmatic use.
 
 ---
 
@@ -49,7 +49,7 @@ Execute source code inside a sandboxed environment and return the results.
 | `language` | `string` | Yes | -- | Language identifier (see [Supported Languages](getting-started.md#supported-languages)) |
 | `compile_timeout` | `float` | No | `10` | Maximum seconds for compilation (compiled languages only) |
 | `run_timeout` | `float` | No | `10` | Maximum seconds for execution |
-| `memory_limit_MB` | `int` | No | `-1` | Memory limit in MB (`-1` = no limit) |
+| `memory_limit_MB` | `int` | No | `-1` | Memory limit in MB. `-1` uses the server default (`sandbox.default_memory_limit_mb`, typically 8192 MB). |
 | `stdin` | `string` | No | `null` | String to pipe into the program's standard input |
 | `files` | `Dict[string, string]` | No | `{}` | File path to base64-encoded content mapping; files are written into the sandbox before execution |
 | `fetch_files` | `List[string]` | No | `[]` | File paths to read back from the sandbox after execution |

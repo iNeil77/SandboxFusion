@@ -20,8 +20,8 @@ and tear down the OS-level isolation layers used when
 * **Filesystem isolation** -- :func:`tmp_overlayfs` creates an overlayfs whose
   lower layer is the host root (``/``), with a tmpfs-backed upper layer so all
   writes are ephemeral.
-* **Resource limits** -- :func:`tmp_cgroup` creates cgroup v1 controllers for
-  memory and/or CPU quota.
+* **Resource limits** -- :func:`tmp_cgroup` creates cgroup v1 or v2 controllers
+  (auto-detected) for memory and/or CPU quota.
 * **Network isolation** -- :func:`tmp_netns` creates a dedicated network
   namespace via helper shell scripts, drawing subnet addresses from a
   pre-computed pool that is partitioned per ``pytest-xdist`` worker to avoid

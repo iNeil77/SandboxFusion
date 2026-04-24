@@ -52,16 +52,26 @@ git clone https://github.com/<your-org>/SandboxFusion.git
 cd SandboxFusion
 
 # Build the base image (installs all language runtimes -- takes ~20 min first time)
-make build-base-image       # produces ineil77/sandbox-fusion-base:23042026-2
+make build-base-image       # produces ineil77/sandbox-fusion-base:24042026-2
 
-# Build the server image (adds the app + Python deps on top of ineil77/sandbox-fusion-base:23042026-2)
-make build-server-image     # produces ineil77/sandbox-fusion-server:23042026-2
+# Build the server image (adds the app + Python deps on top of ineil77/sandbox-fusion-base:24042026-2)
+make build-server-image     # produces ineil77/sandbox-fusion-server:24042026-2
 
 # Run the server
-docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:23042026-2
+docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:24042026-2
 ```
 
-The `--privileged` flag is required because the sandbox uses overlayfs, cgroups, and network namespaces for lite isolation. If you run with `full` isolation mode, the container needs access to a Docker socket (nested Docker is **not** used; see the Isolation Modes document).
+The `--privileged` flag is required because the sandbox uses overlayfs, cgroups, and network namespaces for lite isolation. If you run with `full` isolation mode, also mount the Docker socket and share `/tmp`:
+
+```bash
+docker run -d --rm --privileged -p 8080:8080 \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v /tmp:/tmp \
+    -e SANDBOX_CONFIG=full_test \
+    ineil77/sandbox-fusion-server:24042026-2
+```
+
+Nested Docker is **not** used; execution containers are siblings on the host daemon. See the [Isolation Modes](isolation-modes.md) document for details.
 
 The server is now available at `http://localhost:8080`.
 
@@ -197,7 +207,8 @@ curl -X POST http://localhost:8080/submit \
 ## Running Tests
 
 ```bash
-make test                        # All tests with 4 parallel workers
+make test                        # All tests with 64 parallel workers (TEST_NP=64)
+make test TEST_NP=8              # Override parallelism (recommended for full mode)
 make test-case CASE=test_python  # Single test with stdout visible
 make test-minor                  # Minor language tests only
 ```
@@ -209,3 +220,4 @@ make test-minor                  # Minor language tests only
 - [Isolation Modes](isolation-modes.md) -- Detailed guide to lite and full isolation
 - [Execution Details](execution-details.md) -- Per-language compilation/execution specifics
 - [Python SDK](python-sdk.md) -- Using the Python client library
+- [SkyRL Code-Contests Tutorial](skyrl-code-contests.md) -- RL training for competitive programming with SkyRL

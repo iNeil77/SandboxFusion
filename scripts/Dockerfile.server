@@ -12,7 +12,7 @@
 # - pip/conda caches cleaned after installs
 # =============================================================================
 
-FROM ineil77/sandbox-fusion-base:24042026
+FROM ineil77/sandbox-fusion-base:24042026-2
 
 # ---------------------------------------------------------------------------
 # Docker CLI (required for full mode to spawn sibling execution containers)

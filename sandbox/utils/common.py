@@ -136,11 +136,13 @@ def find_conda_root():
 
 
 def ensure_php_tag_in_string(php_code: str) -> str:
-    """
-    Ensure that a string containing PHP code starts with <?php tag.
-    
-    :param php_code: A string containing PHP code
-    :return: The PHP code string, with <?php tag prepended if it was missing
+    """Ensure that a PHP code string starts with the ``<?php`` tag.
+
+    Args:
+        php_code: A string containing PHP code.
+
+    Returns:
+        The PHP code string, with ``<?php`` prepended if it was missing.
     """
     php_code = php_code.lstrip()
     if not php_code.startswith('<?php'):
@@ -167,16 +169,16 @@ def ensure_json(obj: Dict[str, Any], key: str) -> Dict[str, Any]:
 
 
 def truncate_str(s: str, max_length: int = 1000, placeholder: str = '...') -> str:
-    """
-    Truncate string if it exceeds max_length by keeping both ends and adding placeholder in middle
-    
+    """Truncate a string by keeping both ends and inserting a placeholder in the middle.
+
     Args:
-        s: Input string
-        max_length: Maximum length limit, defaults to 1000
-        placeholder: String used as placeholder, defaults to '...'
-        
+        s: Input string.
+        max_length: Maximum length limit. Defaults to 1000.
+        placeholder: String used as the middle placeholder. Defaults to ``'...'``.
+
     Returns:
-        Processed string, either original or truncated
+        The original string if within the limit, or a truncated version with
+        the placeholder in the middle.
     """
     if not s or len(s) <= max_length:
         return s
