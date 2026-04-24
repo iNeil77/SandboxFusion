@@ -29,6 +29,7 @@ import tempfile
 from typing import Optional
 
 from sandbox.runners.base import restore_files, run_commands
+from sandbox.runners.major import _runtime_dir
 from sandbox.runners.types import CodeRunArgs, CodeRunResult, CommandRunResult, CommandRunStatus
 from sandbox.utils.execution import get_tmp_dir
 
@@ -167,7 +168,7 @@ async def run_lean(args: CodeRunArgs) -> CodeRunResult:
     to share the PID namespace.  The build step itself verifies that all
     theorems are proven; there is no separate execution step.
     """
-    deps_dir = os.path.abspath(os.path.join(__file__, '../../../runtime/lean'))
+    deps_dir = _runtime_dir('lean')
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         os.makedirs(os.path.join(tmp_dir, '.lake'))

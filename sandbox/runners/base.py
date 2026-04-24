@@ -297,6 +297,20 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
                     await asyncio.wait_for(rm.wait(), timeout=10)
                 except Exception:
                     logger.warning('failed to force-remove docker container', name=name)
+            # Docker containers create files as root inside bind-mounted cwd.
+            # Fix ownership so the caller's TemporaryDirectory cleanup succeeds.
+            try:
+                fix = await asyncio.create_subprocess_exec(
+                    'docker', 'run', '--rm',
+                    '-v', f'{cwd}:{cwd}',
+                    docker_image,
+                    'chown', '-R', f'{os.getuid()}:{os.getgid()}', cwd,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                )
+                await asyncio.wait_for(fix.wait(), timeout=10)
+            except Exception:
+                pass
 
         for filename in args.fetch_files:
             fp = os.path.abspath(os.path.join(cwd, filename))

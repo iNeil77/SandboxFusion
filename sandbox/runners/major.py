@@ -47,14 +47,45 @@ from sandbox.utils.execution import get_tmp_dir
 logger = structlog.stdlib.get_logger()
 config = RunConfig.get_instance_sync()
 
+_HOST_RUNTIME_DIR = os.path.abspath(os.path.join(__file__, '../../../runtime'))
+_DOCKER_RUNTIME_DIR = '/root/sandbox/runtime'
+
+
+def _runtime_dir(subpath: str) -> str:
+    """Return the absolute path to a runtime sub-directory.
+
+    In full (Docker) mode the runtimes live at a well-known location inside
+    the Docker image; in lite mode they live relative to this source tree.
+    """
+    base = _DOCKER_RUNTIME_DIR if config.sandbox.isolation == 'full' else _HOST_RUNTIME_DIR
+    return os.path.join(base, subpath)
+
+
+_DOCKER_IMAGE_BASE_PATH = (
+    '/usr/local/swift/bin:'
+    '/root/.elan/bin:'
+    '/usr/local/kotlin/kotlinc/bin:'
+    '/root/.cargo/bin:'
+    '/usr/local/lib/nodejs/node/bin:'
+    '/bin:'
+    '/usr/local/go/bin:'
+    '/root/.local/bin:'
+    '/root/miniconda3/bin:'
+    '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+)
+
 
 @cache
 def get_python_rt_env(env_name: str):
     """Return a ``PATH`` env dict pointing at the named conda environment's Python.
 
-    Activates the specified conda environment, locates its ``python`` binary,
-    and builds a ``PATH`` string that prepends that directory while filtering
-    out any existing ``sandbox`` environment paths to avoid conflicts.
+    In **full** (Docker) isolation mode, returns a pre-computed PATH using
+    well-known paths from the Docker image — no host-side probing required.
+
+    In **lite** isolation mode, activates the specified conda environment on
+    the host, locates its ``python`` binary, and builds a ``PATH`` string
+    that prepends that directory while filtering out any existing ``sandbox``
+    environment paths to avoid conflicts.
 
     Args:
         env_name: Name of the conda environment (e.g. ``'sandbox-runtime'``).
@@ -63,12 +94,16 @@ def get_python_rt_env(env_name: str):
         A dict with a single ``'PATH'`` key suitable for passing as
         *extra_env* to :func:`~sandbox.runners.base.run_command_bare`.
     """
+    if config.sandbox.isolation == 'full':
+        python_bin_dir = f'/root/miniconda3/envs/{env_name}/bin'
+        return {'PATH': f'{python_bin_dir}:{_DOCKER_IMAGE_BASE_PATH}'}
+
     r = subprocess.run(f'bash -c "source {find_conda_root()}/bin/activate {env_name} && which python"',
                        capture_output=True,
                        text=True,
                        check=True,
                        shell=True)
-    python_path = os.path.dirname(r.stdout)
+    python_path = os.path.dirname(r.stdout.strip())
     original_paths = os.environ.get('PATH', '').split(':')
     filtered_path = ':'.join([p for p in original_paths if '/envs/sandbox/' not in p])
     return {'PATH': f'{python_path}:{filtered_path}'}
@@ -79,17 +114,21 @@ __cpp_rt_flags_lock = asyncio.Lock()
 
 
 async def get_cpp_rt_flags():
-    """Probe the host compiler for optional linker flags and cache the result.
+    """Probe the compiler for optional linker flags and cache the result.
 
-    Tries each flag in ``[-lcrypto, -lssl, -lpthread]`` by compiling a trivial
-    C++ program.  Flags that produce a successful build are remembered and
-    appended to all subsequent C++ compile commands.
+    In **full** (Docker) isolation mode, returns the flags known to be
+    available in the Docker image without probing the host.
+
+    In **lite** mode, tries each flag in ``[-lcrypto, -lssl, -lpthread]``
+    by compiling a trivial C++ program on the host.  Flags that produce a
+    successful build are remembered and appended to all subsequent C++
+    compile commands.
 
     Protected by an asyncio.Lock so concurrent C++ requests don't race on
     the first-time detection.
 
     Returns:
-        A list of flag strings that the host ``g++`` supports.
+        A list of flag strings that ``g++`` supports.
     """
     global __cpp_rt_flags
     if __cpp_rt_flags is not None:
@@ -97,6 +136,11 @@ async def get_cpp_rt_flags():
 
     async with __cpp_rt_flags_lock:
         if __cpp_rt_flags is not None:
+            return __cpp_rt_flags
+
+        if config.sandbox.isolation == 'full':
+            __cpp_rt_flags = ['-lcrypto', '-lssl', '-lpthread']
+            logger.info('full mode: using known Docker image C++ flags', flags=__cpp_rt_flags)
             return __cpp_rt_flags
 
         logger.info(f'checking available gcc flags...')
@@ -156,8 +200,23 @@ async def run_csharp(args: CodeRunArgs) -> CodeRunResult:
     """Create a .NET console project, replace ``Program.cs``, and run via ``dotnet run``."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
-        create_project_command = f"dotnet new console -o {tmp_dir}"
-        await run_command_bare(create_project_command, timeout=args.compile_timeout, cwd=tmp_dir)
+
+        if config.sandbox.isolation == 'full':
+            docker_image = config.sandbox.docker_image
+            uid, gid = os.getuid(), os.getgid()
+            setup_cmd = [
+                'docker', 'run', '--rm',
+                '-v', f'{tmp_dir}:{tmp_dir}',
+                '-w', tmp_dir,
+                '--network', 'none',
+                docker_image,
+                'bash', '-c',
+                f'dotnet new console -o {tmp_dir} --force && chown -R {uid}:{gid} {tmp_dir}',
+            ]
+            await run_command_bare(setup_cmd, timeout=args.compile_timeout + 10, use_exec=True)
+        else:
+            await run_command_bare(f'dotnet new console -o {tmp_dir}', timeout=args.compile_timeout, cwd=tmp_dir)
+
         cs_file_path = os.path.join(tmp_dir, 'Program.cs')
         with open(cs_file_path, 'w') as cs_file:
             cs_file.write(args.code)
@@ -168,7 +227,7 @@ async def run_csharp(args: CodeRunArgs) -> CodeRunResult:
 async def run_go_test(args: CodeRunArgs) -> CodeRunResult:
     """Run Go test code via ``go test``, copying runtime support files first."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
-        source_dir = os.path.abspath(os.path.join(__file__, '../../../runtime/go'))
+        source_dir = os.path.join(_HOST_RUNTIME_DIR, 'go')
         for file in os.listdir(source_dir):
             shutil.copy2(os.path.join(source_dir, file), tmp_dir)
         restore_files(tmp_dir, args.files)
@@ -181,7 +240,7 @@ async def run_go_test(args: CodeRunArgs) -> CodeRunResult:
 async def run_go(args: CodeRunArgs) -> CodeRunResult:
     """Compile Go code with ``go build`` and run the resulting binary."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
-        source_dir = os.path.abspath(os.path.join(__file__, '../../../runtime/go'))
+        source_dir = os.path.join(_HOST_RUNTIME_DIR, 'go')
         for file in os.listdir(source_dir):
             shutil.copy2(os.path.join(source_dir, file), tmp_dir)
         restore_files(tmp_dir, args.files)
@@ -194,7 +253,7 @@ async def run_go(args: CodeRunArgs) -> CodeRunResult:
 async def run_java(args: CodeRunArgs) -> CodeRunResult:
     """Compile and run Java code, including ``javatuples`` and any user-supplied JARs on the classpath."""
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
-        deps_dir = os.path.abspath(os.path.join(__file__, '../../../runtime/java'))
+        deps_dir = os.path.join(_HOST_RUNTIME_DIR, 'java')
         shutil.copy2(os.path.join(deps_dir, 'javatuples-1.2.jar'), tmp_dir)
         restore_files(tmp_dir, args.files)
         jars = ['.', 'javatuples-1.2.jar'] + [filename for filename in args.files.keys() if filename.endswith('.jar')]
@@ -211,7 +270,7 @@ async def run_junit(args: CodeRunArgs) -> CodeRunResult:
     junit_jar = 'junit-platform-console-standalone-1.8.2.jar'
     deps = ['junit-jupiter-api-5.11.0-javadoc.jar']
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
-        deps_dir = os.path.abspath(os.path.join(__file__, '../../../runtime/java'))
+        deps_dir = os.path.join(_HOST_RUNTIME_DIR, 'java')
         for dep in deps:
             shutil.copy2(os.path.join(deps_dir, dep), tmp_dir)
         shutil.copy2(os.path.join(deps_dir, junit_jar), tmp_dir)
@@ -231,8 +290,7 @@ async def run_junit(args: CodeRunArgs) -> CodeRunResult:
 
 async def run_nodejs(args: CodeRunArgs) -> CodeRunResult:
     """Run JavaScript code via ``node``, symlinking the shared ``node_modules``."""
-    # Would be costly to copy entire node_modules into a new tmp folder, so we just symlink it
-    deps_dir = os.path.abspath(os.path.join(__file__, '../../../runtime/node'))
+    deps_dir = _runtime_dir('node')
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         os.symlink(os.path.join(deps_dir, 'node_modules'), os.path.join(tmp_dir, 'node_modules'))
@@ -244,7 +302,7 @@ async def run_nodejs(args: CodeRunArgs) -> CodeRunResult:
 
 async def run_typescript(args: CodeRunArgs) -> CodeRunResult:
     """Run TypeScript code via ``tsx``, symlinking the shared ``node_modules``."""
-    deps_dir = os.path.abspath(os.path.join(__file__, '../../../runtime/node'))
+    deps_dir = _runtime_dir('node')
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         os.symlink(os.path.join(deps_dir, 'node_modules'), os.path.join(tmp_dir, 'node_modules'))
@@ -256,7 +314,7 @@ async def run_typescript(args: CodeRunArgs) -> CodeRunResult:
 
 async def run_jest(args: CodeRunArgs) -> CodeRunResult:
     """Run TypeScript test code via Jest (``npm run test``), symlinking shared Node runtime files."""
-    deps_dir = os.path.abspath(os.path.join(__file__, '../../../runtime/node'))
+    deps_dir = _runtime_dir('node')
     with tempfile.TemporaryDirectory(dir=get_tmp_dir(), ignore_cleanup_errors=True) as tmp_dir:
         restore_files(tmp_dir, args.files)
         for fn in ['node_modules', 'package.json', 'babel.config.js']:
