@@ -425,7 +425,7 @@ Start SandboxFusion:
 
 ```bash
 # Terminal 1: start the sandbox server
-docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:24042026-2
+docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:24042026-3
 ```
 
 Verify it's healthy:

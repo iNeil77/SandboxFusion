@@ -52,13 +52,13 @@ git clone https://github.com/<your-org>/SandboxFusion.git
 cd SandboxFusion
 
 # Build the base image (installs all language runtimes -- takes ~20 min first time)
-make build-base-image       # produces ineil77/sandbox-fusion-base:24042026-2
+make build-base-image       # produces ineil77/sandbox-fusion-base:24042026-3
 
-# Build the server image (adds the app + Python deps on top of ineil77/sandbox-fusion-base:24042026-2)
-make build-server-image     # produces ineil77/sandbox-fusion-server:24042026-2
+# Build the server image (adds the app + Python deps on top of ineil77/sandbox-fusion-base:24042026-3)
+make build-server-image     # produces ineil77/sandbox-fusion-server:24042026-3
 
 # Run the server
-docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:24042026-2
+docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:24042026-3
 ```
 
 The `--privileged` flag is required because the sandbox uses overlayfs, cgroups, and network namespaces for lite isolation. If you run with `full` isolation mode, also mount the Docker socket and share `/tmp`:
@@ -68,7 +68,7 @@ docker run -d --rm --privileged -p 8080:8080 \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v /tmp:/tmp \
     -e SANDBOX_CONFIG=full_test \
-    ineil77/sandbox-fusion-server:24042026-2
+    ineil77/sandbox-fusion-server:24042026-3
 ```
 
 Nested Docker is **not** used; execution containers are siblings on the host daemon. See the [Isolation Modes](isolation-modes.md) document for details.

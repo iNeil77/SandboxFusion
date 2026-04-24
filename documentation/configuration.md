@@ -33,7 +33,7 @@ The YAML file maps to the `RunConfig` pydantic model defined in `sandbox/configs
 sandbox:
   isolation: lite                  # "lite" or "full"
   max_concurrency: 34              # Max simultaneous sandbox instances (0 = unlimited)
-  docker_image: ineil77/sandbox-fusion-server:24042026-2  # Docker image for "full" isolation mode
+  docker_image: ineil77/sandbox-fusion-server:24042026-3  # Docker image for "full" isolation mode
   default_memory_limit_mb: 8192    # Default memory limit per sandbox execution (MB)
   default_cpu_limit: 2             # Default CPU core limit per sandbox execution
 
@@ -50,7 +50,7 @@ common:
 |-------|------|---------|-------------|
 | `isolation` | `"lite"` or `"full"` | -- (required) | Isolation mode for code execution. See [Isolation Modes](isolation-modes.md). |
 | `max_concurrency` | `int` | -- (required) | Maximum number of sandbox instances that may run in parallel. Set to `0` to disable the internal concurrency limiter (useful when concurrency is managed externally, e.g. by pytest-xdist). |
-| `docker_image` | `string` | `"ineil77/sandbox-fusion-server:24042026-2"` | Docker image used when `isolation` is `"full"`. Must have all language runtimes installed. |
+| `docker_image` | `string` | `"ineil77/sandbox-fusion-server:24042026-3"` | Docker image used when `isolation` is `"full"`. Must have all language runtimes installed. |
 | `default_memory_limit_mb` | `int` | `8192` | Default memory limit in megabytes for each sandbox execution. Overridden per-request by `memory_limit_MB` when > 0. |
 | `default_cpu_limit` | `float` | `2` | Default CPU core limit for each sandbox execution. In lite mode this sets the CFS quota; in full mode it maps to `docker run --cpus`. |
 
@@ -74,7 +74,7 @@ common:
 sandbox:
   isolation: lite
   max_concurrency: 34
-  docker_image: ineil77/sandbox-fusion-server:24042026-2
+  docker_image: ineil77/sandbox-fusion-server:24042026-3
   default_memory_limit_mb: 8192
   default_cpu_limit: 2
 
@@ -96,7 +96,7 @@ common:
 sandbox:
   isolation: lite
   max_concurrency: 0
-  docker_image: ineil77/sandbox-fusion-server:24042026-2
+  docker_image: ineil77/sandbox-fusion-server:24042026-3
 
 eval:
   max_runner_concurrency: 3
@@ -114,7 +114,7 @@ common:
 sandbox:
   isolation: full
   max_concurrency: 0
-  docker_image: ineil77/sandbox-fusion-server:24042026-2
+  docker_image: ineil77/sandbox-fusion-server:24042026-3
   default_memory_limit_mb: 8192
   default_cpu_limit: 2
 
@@ -143,7 +143,7 @@ Example for a production deployment using Docker-based full isolation:
 sandbox:
   isolation: full
   max_concurrency: 100
-  docker_image: ineil77/sandbox-fusion-server:24042026-2
+  docker_image: ineil77/sandbox-fusion-server:24042026-3
   default_memory_limit_mb: 8192
   default_cpu_limit: 2
 

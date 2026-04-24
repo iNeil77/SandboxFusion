@@ -64,7 +64,7 @@ Full isolation runs each code execution inside a disposable Docker container. Th
 
 When a code execution request arrives, the sandbox:
 
-1. **Launches a Docker container** from the configured `docker_image` (default: `ineil77/sandbox-fusion-server:24042026-2`) with these flags:
+1. **Launches a Docker container** from the configured `docker_image` (default: `ineil77/sandbox-fusion-server:24042026-3`) with these flags:
    - `--rm` -- Container is automatically removed after exit.
    - `--memory` -- Memory limit from the request or `sandbox.default_memory_limit_mb` (default 8192 MB).
    - `--cpus` -- CPU limit from `sandbox.default_cpu_limit` (default 2 cores).
@@ -78,7 +78,7 @@ When a code execution request arrives, the sandbox:
 ### Requirements
 
 - **Docker daemon**: Must be installed and running on the host.
-- **`ineil77/sandbox-fusion-server:24042026-2` image**: The Docker image must have all language runtimes pre-installed. Build it with `make build-server-image`.
+- **`ineil77/sandbox-fusion-server:24042026-3` image**: The Docker image must have all language runtimes pre-installed. Build it with `make build-server-image`.
 - **No nested Docker**: Full isolation does NOT use Docker-in-Docker. The host Docker daemon creates sibling containers (Docker-out-of-Docker).
 - **Shared `/tmp`**: When the server runs inside Docker, launch with `-v /tmp:/tmp` so that sibling execution containers can access the temp directories created by the server. Without this, all executions fail with "No such file or directory".
 - **Docker socket**: The server container needs `-v /var/run/docker.sock:/var/run/docker.sock` to communicate with the host Docker daemon.
@@ -89,12 +89,12 @@ When a code execution request arrives, the sandbox:
 sandbox:
   isolation: full
   max_concurrency: 100
-  docker_image: ineil77/sandbox-fusion-server:24042026-2
+  docker_image: ineil77/sandbox-fusion-server:24042026-3
   default_memory_limit_mb: 8192
   default_cpu_limit: 2
 ```
 
-The `docker_image` field specifies which image to use for execution containers. It defaults to `ineil77/sandbox-fusion-server:24042026-2`, which is built by `make build-server-image` and includes all 20+ language runtimes.
+The `docker_image` field specifies which image to use for execution containers. It defaults to `ineil77/sandbox-fusion-server:24042026-3`, which is built by `make build-server-image` and includes all 20+ language runtimes.
 
 **Launching for full mode (Docker-out-of-Docker):**
 
@@ -104,7 +104,7 @@ docker run -d --rm --privileged \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v /tmp:/tmp \
     -e SANDBOX_CONFIG=full_test \
-    ineil77/sandbox-fusion-server:24042026-2
+    ineil77/sandbox-fusion-server:24042026-3
 ```
 
 ---
@@ -122,7 +122,7 @@ docker run -d --rm --privileged \
 ### Typical deployment patterns
 
 **Docker deployment (recommended):**
-- Build `ineil77/sandbox-fusion-server:24042026-2` which runs the SandboxFusion server inside a Docker container.
+- Build `ineil77/sandbox-fusion-server:24042026-3` which runs the SandboxFusion server inside a Docker container.
 - The server uses **lite** isolation inside the container (overlayfs + cgroups within the privileged container).
 - The container needs `--privileged` for overlayfs/cgroups.
 - No nested Docker involved.
@@ -134,7 +134,7 @@ docker run -d --rm --privileged \
 
 **Full isolation deployment:**
 - The SandboxFusion server runs on the host (or in a container with Docker socket access and `-v /tmp:/tmp`).
-- Each code execution spawns a separate `ineil77/sandbox-fusion-server:24042026-2` container via the host Docker daemon.
+- Each code execution spawns a separate `ineil77/sandbox-fusion-server:24042026-3` container via the host Docker daemon.
 - Use when you want maximum isolation and can tolerate higher latency.
 
 ### Behavioral differences between modes
