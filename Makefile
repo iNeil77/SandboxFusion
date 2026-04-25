@@ -14,22 +14,21 @@ install-runtimes:
 	cd runtime/lean && lake build
 
 build-base-image:
-	docker build . -f scripts/Dockerfile.base -t ineil77/sandbox-fusion-base:24042026-4
+	docker build . -f scripts/Dockerfile.base -t ineil77/sandbox-fusion-base:25042026
 
 build-server-image:
-	docker build . -f scripts/Dockerfile.server -t ineil77/sandbox-fusion-server:24042026-4
+	docker build . -f scripts/Dockerfile.server -t ineil77/sandbox-fusion-server:25042026
 
-test:
-	pytest -m "not datalake" -n $(TEST_NP)
+test: test-docker-full
 
-test-minor:
-	pytest -m minor
+test-docker-full:
+	pytest -m "not datalake" -n $(TEST_NP) --sandbox-docker full
 
-test-online:
-	ONLINE_TEST=1 pytest
+test-docker-lite:
+	pytest -m "not datalake" -n $(TEST_NP) --sandbox-docker lite
 
 test-case:
-	pytest -s -vv -k $(CASE)
+	pytest -s -vv -k $(CASE) --sandbox-docker $(MODE)
 
 format:
 	pycln --config pyproject.toml
@@ -43,4 +42,4 @@ format-client:
 check:
 	pycln --config pyproject.toml --check
 	yapf --diff --recursive sandbox/*
-	make test
+	make test-docker-full

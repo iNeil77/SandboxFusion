@@ -17,14 +17,10 @@ Covers console output, timeout enforcement, Debug.Assert assertion
 errors, and stdin delivery.
 """
 
-from fastapi.testclient import TestClient
-
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def test_csharp_print():
     """Console.WriteLine should produce expected stdout after compilation and execution."""
@@ -46,7 +42,6 @@ def test_csharp_print():
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Success
     assert result.run_result.stdout.strip() == '123'
-
 
 def test_csharp_timeout():
     """Thread.Sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
@@ -71,7 +66,6 @@ def test_csharp_timeout():
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.TimeLimitExceeded
 
-
 def test_csharp_assertion_error():
     """A Debug.Assert failure should produce the assertion message in stderr and a Failed status."""
     request = RunCodeRequest(language='csharp',
@@ -93,7 +87,6 @@ def test_csharp_assertion_error():
     assert result.status == RunStatus.Failed
     # Note: Handling of assertions may vary depending on how the sandbox captures output and errors
     assert "Assertion failed" in result.run_result.stderr
-
 
 def test_csharp_stdin():
     """Stdin data should be delivered to the C# program and readable via Console.ReadLine."""

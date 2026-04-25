@@ -244,17 +244,29 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
             else:
                 for cg in cgroups:
                     prefix += ['cgexec', '-g', cg]
+            _needs_sudo = os.getuid() != 0
+            if _needs_sudo:
+                prefix += ['sudo']
             if not kwargs.get('disable_pid_isolation', False):
                 prefix += ['unshare', '--pid', '--fork', '--mount-proc']
             prefix += ['ip', 'netns', 'exec', netns]
             prefix += ['chroot', root]
 
+            def _env_prefix(env: dict | None) -> str:
+                """Build an export prefix so env vars survive sudo's env_reset."""
+                if not env or not _needs_sudo:
+                    return ''
+                parts = [f'export {k}={_shell_quote(v)}' for k, v in env.items()]
+                return ' && '.join(parts) + ' && '
+
             if compile_command is not None:
-                compile_res = await run_command_bare(prefix + ['bash', '-c', f'cd {cwd} && {compile_command}'],
+                cmd = f'{_env_prefix(extra_env)}cd {cwd} && {compile_command}'
+                compile_res = await run_command_bare(prefix + ['bash', '-c', cmd],
                                                      args.compile_timeout, None, cwd, extra_env, True)
             if compile_res is None or (compile_res.status == CommandRunStatus.Finished and
                                        compile_res.return_code == 0):
-                run_res = await run_command_bare(prefix + ['bash', '-c', f'cd {cwd} && {run_command}'],
+                cmd = f'{_env_prefix(extra_env)}cd {cwd} && {run_command}'
+                run_res = await run_command_bare(prefix + ['bash', '-c', cmd],
                                                  args.run_timeout, args.stdin, cwd, extra_env, True)
 
             for filename in args.fetch_files:

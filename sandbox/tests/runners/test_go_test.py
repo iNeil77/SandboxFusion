@@ -17,14 +17,10 @@ Covers passing tests, failing tests (with testify assertions), and
 timeout enforcement when running ``go test`` style code.
 """
 
-from fastapi.testclient import TestClient
-
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def test_golang_test_pass():
     """A correct HasCloseElements implementation should pass all testify assertions."""
@@ -69,7 +65,6 @@ def test_golang_test_pass():
     assert result.status == RunStatus.Success
     assert 'ok' in result.run_result.stdout.strip()
 
-
 def test_golang_test_fail():
     """An incorrect implementation (inverted logic) should fail with 'Not equal' in stdout."""
     request = RunCodeRequest(language='go_test',
@@ -113,7 +108,6 @@ def test_golang_test_fail():
     print(result)
     assert result.status == RunStatus.Failed
     assert 'Not equal' in result.run_result.stdout.strip()
-
 
 def test_golang_test_timeout():
     """A test that sleeps longer than run_timeout should be killed as TimeLimitExceeded."""

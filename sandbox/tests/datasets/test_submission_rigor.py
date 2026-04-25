@@ -35,18 +35,13 @@ Categories covered:
   - EvalResult structure
 """
 
-from fastapi.testclient import TestClient
-
 from sandbox.datasets.types import EvalResult, GeneralStdioTest, TestConfig, SubmitRequest
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def _make_cases(pairs):
     """Helper to build GeneralStdioTest list from (stdin, stdout) tuples."""
     return [GeneralStdioTest(input={'stdin': p[0]}, output={'stdout': p[1]}) for p in pairs]
-
 
 # ---------------------------------------------------------------------------
 #  Correct submissions (accepted)
@@ -67,7 +62,6 @@ async def test_submit_python_correct_single_case():
     assert len(result.tests) == 1
     assert result.tests[0].passed is True
 
-
 async def test_submit_python_correct_multiple_cases():
     """All test cases must pass for accepted=True."""
     cases = _make_cases([('2\n', '4\n'), ('5\n', '25\n'), ('0\n', '0\n'), ('-3\n', '9\n')])
@@ -83,7 +77,6 @@ async def test_submit_python_correct_multiple_cases():
     assert result.accepted is True
     assert len(result.tests) == 4
     assert all(t.passed for t in result.tests)
-
 
 async def test_submit_cpp_correct():
     """A C++ submission through the full pipeline."""
@@ -110,7 +103,6 @@ int main() {
     result = EvalResult(**response.json())
     assert result.accepted is True
 
-
 # ---------------------------------------------------------------------------
 #  Wrong-answer submissions
 # ---------------------------------------------------------------------------
@@ -128,7 +120,6 @@ async def test_submit_python_wrong_answer():
     result = EvalResult(**response.json())
     assert result.accepted is False
 
-
 async def test_submit_partial_failure():
     """If one of multiple test cases fails, accepted should be False."""
     cases = _make_cases([('2\n', '4\n'), ('3\n', '9\n'), ('4\n', '99\n')])  # last is wrong expected
@@ -142,7 +133,6 @@ async def test_submit_partial_failure():
     assert response.status_code == 200
     result = EvalResult(**response.json())
     assert result.accepted is False
-
 
 # ---------------------------------------------------------------------------
 #  Runtime errors
@@ -163,7 +153,6 @@ async def test_submit_python_runtime_error():
     assert len(result.tests) >= 1
     assert result.tests[0].passed is False
 
-
 async def test_submit_cpp_compile_error():
     """A C++ submission that fails compilation should be rejected."""
     request = SubmitRequest(
@@ -176,7 +165,6 @@ async def test_submit_cpp_compile_error():
     assert response.status_code == 200
     result = EvalResult(**response.json())
     assert result.accepted is False
-
 
 # ---------------------------------------------------------------------------
 #  Timeout during evaluation
@@ -194,7 +182,6 @@ async def test_submit_python_timeout():
     assert response.status_code == 200
     result = EvalResult(**response.json())
     assert result.accepted is False
-
 
 # ---------------------------------------------------------------------------
 #  Code extraction
@@ -224,7 +211,6 @@ This works by squaring the input.'''
     assert 'n * n' in result.extracted_code
     assert "Here's my solution" not in result.extracted_code
 
-
 async def test_submit_extracts_raw_code_no_fence():
     """If there are no fences, the extractor falls back to heuristics.
     Raw unfenced code that doesn't match heuristic patterns yields empty extracted_code."""
@@ -239,7 +225,6 @@ async def test_submit_extracts_raw_code_no_fence():
     assert response.status_code == 200
     result = EvalResult(**response.json())
     assert isinstance(result.accepted, bool)
-
 
 async def test_submit_unfenced_code_via_incomplete_fence():
     """An incomplete fence (no closing ```) should still extract code."""
@@ -256,7 +241,6 @@ async def test_submit_unfenced_code_via_incomplete_fence():
     assert result.accepted is True
     assert 'n * n' in result.extracted_code
 
-
 async def test_submit_empty_completion():
     """An empty completion should be rejected, not crash."""
     request = SubmitRequest(
@@ -270,7 +254,6 @@ async def test_submit_empty_completion():
     result = EvalResult(**response.json())
     assert result.accepted is False
 
-
 async def test_submit_garbage_completion():
     """A completion with no extractable code should be rejected."""
     request = SubmitRequest(
@@ -283,7 +266,6 @@ async def test_submit_garbage_completion():
     assert response.status_code == 200
     result = EvalResult(**response.json())
     assert result.accepted is False
-
 
 # ---------------------------------------------------------------------------
 #  Output comparison edge cases
@@ -302,7 +284,6 @@ async def test_submit_trailing_newline_tolerance():
     result = EvalResult(**response.json())
     assert result.accepted is True
 
-
 async def test_submit_trailing_whitespace_tolerance():
     """Trailing spaces on lines should be stripped during comparison."""
     request = SubmitRequest(
@@ -316,7 +297,6 @@ async def test_submit_trailing_whitespace_tolerance():
     result = EvalResult(**response.json())
     assert result.accepted is True
 
-
 async def test_submit_case_insensitive_comparison():
     """Default comparison is case-insensitive (lower_cmp=True in check_stdio_test_case)."""
     request = SubmitRequest(
@@ -329,7 +309,6 @@ async def test_submit_case_insensitive_comparison():
     assert response.status_code == 200
     result = EvalResult(**response.json())
     assert result.accepted is True
-
 
 async def test_submit_multiline_output():
     """Multi-line output should match line by line."""
@@ -345,7 +324,6 @@ async def test_submit_multiline_output():
     result = EvalResult(**response.json())
     assert result.accepted is True
 
-
 async def test_submit_float_tolerance():
     """Floating-point outputs should match within relative tolerance."""
     code = '```python\nprint(3.141590001)\n```'
@@ -359,7 +337,6 @@ async def test_submit_float_tolerance():
     assert response.status_code == 200
     result = EvalResult(**response.json())
     assert result.accepted is True
-
 
 async def test_submit_float_too_far():
     """A floating-point output that is too far from expected should be rejected."""
@@ -375,7 +352,6 @@ async def test_submit_float_too_far():
     result = EvalResult(**response.json())
     assert result.accepted is False
 
-
 async def test_submit_wrong_line_count():
     """Extra or missing output lines should cause rejection."""
     code = '```python\nprint(1)\nprint(2)\nprint(3)\n```'
@@ -389,7 +365,6 @@ async def test_submit_wrong_line_count():
     assert response.status_code == 200
     result = EvalResult(**response.json())
     assert result.accepted is False
-
 
 # ---------------------------------------------------------------------------
 #  run_all_cases flag
@@ -414,7 +389,6 @@ async def test_submit_run_all_cases_flag():
     assert result.tests[1].passed is False
     assert result.tests[2].passed is True
 
-
 async def test_submit_default_stops_on_first_failure():
     """Without run_all_cases, evaluation should stop after the first failed case."""
     cases = _make_cases([('1\n', '999\n'), ('2\n', '4\n'), ('3\n', '9\n')])  # 1st case wrong
@@ -430,7 +404,6 @@ async def test_submit_default_stops_on_first_failure():
     result = EvalResult(**response.json())
     assert result.accepted is False
     assert any(not t.passed for t in result.tests)
-
 
 # ---------------------------------------------------------------------------
 #  Empty test cases
@@ -450,7 +423,6 @@ async def test_submit_with_empty_test_cases():
     assert result.accepted is True
     assert len(result.tests) == 0
 
-
 # ---------------------------------------------------------------------------
 #  EvalResult structure
 # ---------------------------------------------------------------------------
@@ -469,7 +441,6 @@ async def test_eval_result_has_extracted_code():
     assert result.extracted_code is not None
     assert 'print(1)' in result.extracted_code
 
-
 async def test_eval_result_tests_contain_exec_info():
     """Each EvalTestCase should have exec_info with run details."""
     request = SubmitRequest(
@@ -485,7 +456,6 @@ async def test_eval_result_tests_contain_exec_info():
     tc = result.tests[0]
     assert tc.exec_info is not None
     assert tc.exec_info.run_result is not None
-
 
 # ---------------------------------------------------------------------------
 #  Cross-language
@@ -504,7 +474,6 @@ async def test_submit_bash_via_inline_test_cases():
     assert response.status_code == 200
     result = EvalResult(**response.json())
     assert result.accepted is True
-
 
 # ---------------------------------------------------------------------------
 #  Custom extract logic
@@ -541,7 +510,6 @@ if start is not None and end is not None:
     result = EvalResult(**response.json())
     assert result.accepted is True
     assert 'n * n' in result.extracted_code
-
 
 # ---------------------------------------------------------------------------
 #  Stress: many test cases

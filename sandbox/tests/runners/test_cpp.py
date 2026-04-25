@@ -17,14 +17,10 @@ Covers stdout output, timeout enforcement, assertion errors, compilation
 errors, stdin delivery, and multi-threaded (pthread) execution.
 """
 
-from fastapi.testclient import TestClient
-
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def test_cpp_print():
     """A simple cout statement should compile, run, and produce expected stdout."""
@@ -44,7 +40,6 @@ def test_cpp_print():
     assert result.status == RunStatus.Success
     assert result.compile_result.status == CommandRunStatus.Finished
     assert result.run_result.stdout.strip() == '123'
-
 
 def test_cpp_timeout():
     """A sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
@@ -67,7 +62,6 @@ def test_cpp_timeout():
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.TimeLimitExceeded
 
-
 def test_cpp_assertion_error():
     """A failing C assert should produce an Assertion message in stderr and a Failed status."""
     request = RunCodeRequest(language='cpp',
@@ -87,7 +81,6 @@ def test_cpp_assertion_error():
     assert result.run_result.status == CommandRunStatus.Finished
     assert "Assertion" in result.run_result.stderr
 
-
 def test_cpp_compile_error():
     """Invalid C++ code should fail at compilation with a non-zero return code and no run_result."""
     request = RunCodeRequest(language='cpp',
@@ -104,7 +97,6 @@ def test_cpp_compile_error():
     assert result.compile_result.status == CommandRunStatus.Finished
     assert result.compile_result.return_code != 0
     assert result.run_result is None
-
 
 def test_cpp_stdin():
     """Stdin data should be delivered to the compiled program and readable via cin."""
@@ -127,7 +119,6 @@ def test_cpp_stdin():
     assert result.status == RunStatus.Success
     assert result.run_result.status == CommandRunStatus.Finished
     assert result.run_result.stdout == '65535\n'
-
 
 def test_cpp_pthread():
     """A multi-threaded C++ program using std::thread should compile and run correctly.
@@ -176,8 +167,6 @@ private:
     std::condition_variable cv_;
     std::queue<T> queue_;
 };
-
-
 
 void producer(ThreadSafeQueue<int>& queue, int id) {
     for (int i = 0; i < 3; ++i) {
@@ -235,7 +224,6 @@ int main() {
         consumer1.join();
         consumer2.join();
     }
-
 
     return 0;
 }

@@ -19,12 +19,9 @@ run under the ``pytest`` runner, which discovers and executes the test
 classes.
 """
 
-from fastapi.testclient import TestClient
-
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
+from sandbox.tests.client import client
 
 code = r'''
 def word_count(file_path):
@@ -53,7 +50,6 @@ def word_count(file_path):
 import string
 from collections import Counter
 
-
 class Testword_count:
     def test_word_count_case_sensitive_file(self, capfd, tmp_path):
         file_path = tmp_path / 'test_case_sensitive.txt'
@@ -62,7 +58,6 @@ class Testword_count:
         word_count(file_path)
         captured = capfd.readouterr()
         assert "'case': 3" in captured.out
-
 
     def test_word_count_punctuation_file(self, capfd, tmp_path):
         file_path = tmp_path / 'test_punctuation.txt'
@@ -100,7 +95,6 @@ def word_count(file_path):
 import string
 from collections import Counter
 
-
 class Testword_count:
     def test_word_count_case_sensitive_file(self, capfd, tmp_path):
         file_path = tmp_path / 'test_case_sensitive.txt'
@@ -110,7 +104,6 @@ class Testword_count:
         captured = capfd.readouterr()
         assert "'case': 3" not in captured.out
 
-
     def test_word_count_punctuation_file(self, capfd, tmp_path):
         file_path = tmp_path / 'test_punctuation.txt'
         with open(file_path, 'w', encoding='utf-8') as file:
@@ -119,7 +112,6 @@ class Testword_count:
         captured = capfd.readouterr()
         assert "'this': 1\n'sentence': 1\n'has': 1\n'some': 1\n'punctuation': 1\n'like': 1\n'commas': 1\n'and': 1\n'periods': 1\n" not in captured.out
 '''
-
 
 def test_pytest_pass():
     """Code with correct assertions should pass both as plain Python and under pytest."""
@@ -135,7 +127,6 @@ def test_pytest_pass():
     result = RunCodeResponse(**response.json())
     print(result)
     assert result.status == RunStatus.Success
-
 
 def test_pytest_fail():
     """Code with inverted assertions should succeed as plain Python but fail under pytest.

@@ -19,14 +19,11 @@ All tests are marked ``pytest.mark.minor``.
 """
 
 import pytest
-from fastapi.testclient import TestClient
 
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 @pytest.mark.minor
 def test_julia_print():
@@ -41,7 +38,6 @@ println("Hello, World!")
     assert result.status == RunStatus.Success
     assert "Hello, World!" in result.run_result.stdout.strip()
 
-
 @pytest.mark.minor
 def test_julia_timeout():
     """Base.sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
@@ -53,7 +49,6 @@ Base.sleep(5)
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.TimeLimitExceeded
-
 
 @pytest.mark.minor
 def test_julia_assertion_success():
@@ -69,7 +64,6 @@ end
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Success
     assert result.run_result.status == CommandRunStatus.Finished
-
 
 @pytest.mark.minor
 def test_julia_assertion_error():

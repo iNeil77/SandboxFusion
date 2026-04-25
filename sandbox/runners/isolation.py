@@ -255,17 +255,23 @@ def _init_cgroup_v2_delegation():
         if _cgroup_v2_initialized:
             return
         try:
-            import subprocess
+            with open('/sys/fs/cgroup/cgroup.subtree_control') as f:
+                active = set(f.read().split())
+            if {'memory', 'cpu'}.issubset(active):
+                _cgroup_v2_initialized = True
+                return
+
             init_cg = '/sys/fs/cgroup/sandbox_init'
-            subprocess.run(['sudo', 'mkdir', '-p', init_cg], check=True)
+            _subprocess.run(['sudo', 'mkdir', '-p', init_cg], check=True)
             with open('/sys/fs/cgroup/cgroup.procs') as f:
                 pids = f.read().splitlines()
             for pid in pids:
                 if pid.strip():
-                    subprocess.run(
+                    _subprocess.run(
                         ['sudo', 'bash', '-c', f'echo {pid.strip()} > {init_cg}/cgroup.procs'],
-                        check=False)
-            subprocess.run(
+                        check=False,
+                        stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL)
+            _subprocess.run(
                 ['sudo', 'bash', '-c', 'echo "+memory +cpu" > /sys/fs/cgroup/cgroup.subtree_control'],
                 check=True)
             _cgroup_v2_initialized = True
@@ -546,7 +552,7 @@ async def tmp_cgroup(mem_limit: Optional[str] = None, cpu_limit: Optional[float]
 
         wrapper = f'/tmp/cg_enter_{cg_name}.sh'
         with open(wrapper, 'w') as f:
-            f.write(f'#!/bin/bash\necho $$ > {cg_path}/cgroup.procs\nexec "$@"\n')
+            f.write(f'#!/bin/bash\necho $$ | sudo tee {cg_path}/cgroup.procs >/dev/null\nexec "$@"\n')
         os.chmod(wrapper, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
 
         try:

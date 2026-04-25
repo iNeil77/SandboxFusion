@@ -19,14 +19,11 @@ All tests are marked ``pytest.mark.minor``.
 """
 
 import pytest
-from fastapi.testclient import TestClient
 
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 @pytest.mark.minor
 def test_r_print():
@@ -44,7 +41,6 @@ print ( myString )
     assert result.status == RunStatus.Success
     assert "Hello, World!" in result.run_result.stdout.strip()
 
-
 @pytest.mark.minor
 def test_r_timeout():
     """Sys.sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
@@ -60,7 +56,6 @@ print("Finished waiting for 5 seconds.")
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.TimeLimitExceeded
 
-
 @pytest.mark.minor
 def test_r_assertion_success():
     """A passing stopifnot assertion should result in Success status."""
@@ -72,7 +67,6 @@ stopifnot(isTRUE(all.equal(0, 0)))
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Success
     assert result.run_result.status == CommandRunStatus.Finished
-
 
 @pytest.mark.minor
 def test_r_assertion_error():

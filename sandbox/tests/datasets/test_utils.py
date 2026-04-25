@@ -25,13 +25,11 @@ Covers:
 
 import base64
 from collections import Counter
-from fastapi.testclient import TestClient
 
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse
-from sandbox.server.server import app
 from sandbox.utils.testing import parse_jest_cases
 
-client = TestClient(app)
+from sandbox.tests.client import client
 
 JEST_CODE = '''
 describe('Calculator Tests', () => {
@@ -94,7 +92,6 @@ describe('Calculator Tests', () => {
 });
 '''
 
-
 async def test_utils_jest_report():
     """Run a Jest suite with intentional failures and verify the parsed report.
 
@@ -113,7 +110,6 @@ async def test_utils_jest_report():
     ctr = Counter([case['passed'] for case in cases])
     assert ctr[True] == 9
     assert ctr[False] == 2
-
 
 async def test_compatibility_with_null_asset():
     """Ensure that a None value in the files dict does not crash execution.

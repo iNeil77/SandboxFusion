@@ -18,14 +18,10 @@ that returns 0), verifying that the runner correctly reports Success or
 Failed status based on Jest exit codes.
 """
 
-from fastapi.testclient import TestClient
-
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def test_jest_pass():
     """A correct MinSubArrayLen implementation should pass all Jest test cases."""
@@ -78,7 +74,6 @@ describe('MinSubArrayLen', () => {
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Success
     assert result.run_result.status == CommandRunStatus.Finished
-
 
 def test_jest_fail():
     """A stub implementation (always returns 0) should fail the Jest test suite."""

@@ -28,17 +28,12 @@ Categories covered:
   - Status field correctness (Success / Failed / SandboxError)
 """
 
-import asyncio
 import base64
-
-from fastapi.testclient import TestClient
 
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 # ---------------------------------------------------------------------------
 #  Exit code handling
@@ -53,7 +48,6 @@ def test_python_explicit_exit_code_zero():
     assert result.status == RunStatus.Success
     assert result.run_result.return_code == 0
 
-
 def test_python_explicit_exit_code_nonzero():
     """sys.exit(42) should be Failed with return_code 42."""
     request = RunCodeRequest(language='python', code='import sys; sys.exit(42)', run_timeout=5)
@@ -64,7 +58,6 @@ def test_python_explicit_exit_code_nonzero():
     assert result.run_result.status == CommandRunStatus.Finished
     assert result.run_result.return_code == 42
 
-
 def test_bash_explicit_exit_code():
     """exit 7 should be Failed with return_code 7."""
     request = RunCodeRequest(language='bash', code='exit 7', run_timeout=5)
@@ -73,7 +66,6 @@ def test_bash_explicit_exit_code():
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Failed
     assert result.run_result.return_code == 7
-
 
 def test_cpp_nonzero_return():
     """C++ main returning non-zero should be Failed."""
@@ -88,7 +80,6 @@ def test_cpp_nonzero_return():
     assert result.compile_result.status == CommandRunStatus.Finished
     assert result.compile_result.return_code == 0
     assert result.run_result.return_code == 3
-
 
 # ---------------------------------------------------------------------------
 #  stderr vs stdout separation
@@ -106,7 +97,6 @@ def test_python_stderr_stdout_separation():
     assert 'ERR' in result.run_result.stderr
     assert 'ERR' not in result.run_result.stdout
     assert 'OUT' not in result.run_result.stderr
-
 
 def test_cpp_stderr_stdout_separation():
     """C++ stderr and stdout must be captured into separate fields."""
@@ -126,7 +116,6 @@ def test_cpp_stderr_stdout_separation():
     assert 'STDOUT_LINE' in result.run_result.stdout
     assert 'STDERR_LINE' in result.run_result.stderr
 
-
 # ---------------------------------------------------------------------------
 #  Large I/O
 # ---------------------------------------------------------------------------
@@ -144,7 +133,6 @@ def test_python_large_stdout():
     assert len(lines) == n_lines
     assert lines[0] == 'line_0'
     assert lines[-1] == f'line_{n_lines - 1}'
-
 
 def test_python_large_stdin():
     """Large stdin should be delivered correctly."""
@@ -165,7 +153,6 @@ print(total)
     assert result.status == RunStatus.Success
     assert result.run_result.stdout.strip() == str(expected)
 
-
 # ---------------------------------------------------------------------------
 #  Unicode handling
 # ---------------------------------------------------------------------------
@@ -180,7 +167,6 @@ def test_python_unicode_output():
     assert result.status == RunStatus.Success
     assert '\u4e16\u754c' in result.run_result.stdout
 
-
 def test_python_unicode_stdin():
     """Unicode in stdin should reach the program."""
     code = 'import sys; print(sys.stdin.read())'
@@ -190,7 +176,6 @@ def test_python_unicode_stdin():
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Success
     assert '\u00e9\u00e8\u00ea' in result.run_result.stdout
-
 
 # ---------------------------------------------------------------------------
 #  Empty / degenerate code
@@ -205,7 +190,6 @@ def test_python_empty_code():
     assert result.status == RunStatus.Success
     assert result.run_result.stdout == '' or result.run_result.stdout is None or result.run_result.stdout.strip() == ''
 
-
 def test_bash_empty_code():
     """Empty bash script should succeed."""
     request = RunCodeRequest(language='bash', code='', run_timeout=5)
@@ -214,7 +198,6 @@ def test_bash_empty_code():
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Success
 
-
 def test_python_whitespace_only():
     """Whitespace-only Python code should succeed."""
     request = RunCodeRequest(language='python', code='   \n\n   \n', run_timeout=5)
@@ -222,7 +205,6 @@ def test_python_whitespace_only():
     assert response.status_code == 200
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Success
-
 
 # ---------------------------------------------------------------------------
 #  Timeout precision
@@ -238,7 +220,6 @@ def test_python_just_within_timeout():
     assert result.status == RunStatus.Success
     assert 'done' in result.run_result.stdout
 
-
 def test_python_timeout_records_execution_time():
     """When a timeout occurs, execution_time should be populated and close to the timeout."""
     request = RunCodeRequest(language='python', code='import time; time.sleep(10)', run_timeout=0.3)
@@ -250,7 +231,6 @@ def test_python_timeout_records_execution_time():
     assert result.run_result.execution_time is not None
     assert result.run_result.execution_time >= 0.2
 
-
 def test_python_execution_time_tracked_on_success():
     """Successful runs should have execution_time populated."""
     code = 'import time; time.sleep(0.1); print("ok")'
@@ -261,7 +241,6 @@ def test_python_execution_time_tracked_on_success():
     assert result.status == RunStatus.Success
     assert result.run_result.execution_time is not None
     assert result.run_result.execution_time >= 0.05
-
 
 # ---------------------------------------------------------------------------
 #  Multi-line stdin
@@ -288,7 +267,6 @@ for l in lines:
     assert lines[2] == 'WORLD'
     assert lines[3] == 'FOO'
 
-
 def test_cpp_multiline_stdin():
     """C++ reading multiple lines from stdin."""
     code = '''
@@ -312,7 +290,6 @@ def test_cpp_multiline_stdin():
     assert result.status == RunStatus.Success
     assert result.run_result.stdout.strip() == '5'
 
-
 # ---------------------------------------------------------------------------
 #  File round-trip (write then fetch)
 # ---------------------------------------------------------------------------
@@ -333,7 +310,6 @@ print("wrote file")
     content = base64.b64decode(result.files['output.txt']).decode('utf-8')
     assert content == 'result_data_12345'
 
-
 def test_python_fetch_nonexistent_file():
     """Fetching a file that was never created should not crash; just missing from files dict."""
     code = 'print("no file written")'
@@ -343,7 +319,6 @@ def test_python_fetch_nonexistent_file():
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Success
     assert 'does_not_exist.txt' not in result.files
-
 
 def test_python_binary_file_round_trip():
     """Binary data should survive the base64 round-trip through files."""
@@ -367,7 +342,6 @@ print(len(data))
     assert result.run_result.stdout.strip() == '256'
     fetched = base64.b64decode(result.files['output.bin'])
     assert fetched == bytes(range(256))
-
 
 # ---------------------------------------------------------------------------
 #  Compiled language: compile OK but run fails
@@ -393,7 +367,6 @@ def test_cpp_compile_ok_runtime_crash():
     assert result.status == RunStatus.Failed
     assert result.run_result.return_code != 0
 
-
 def test_cpp_compile_ok_run_timeout():
     """Compile succeeds but execution times out."""
     code = '''
@@ -407,7 +380,6 @@ def test_cpp_compile_ok_run_timeout():
     assert result.compile_result.return_code == 0
     assert result.run_result.status == CommandRunStatus.TimeLimitExceeded
     assert result.status == RunStatus.Failed
-
 
 def test_go_compile_error():
     """Go code that fails compilation should not run."""
@@ -426,7 +398,6 @@ def test_go_compile_error():
     assert result.compile_result.return_code != 0
     assert result.run_result is None
 
-
 # ---------------------------------------------------------------------------
 #  Runtime exceptions across languages
 # ---------------------------------------------------------------------------
@@ -442,7 +413,6 @@ def test_python_runtime_exception():
     assert 'ValueError' in result.run_result.stderr
     assert 'test_error_msg' in result.run_result.stderr
 
-
 def test_python_zero_division():
     """ZeroDivisionError should be reported in stderr with a Failed status."""
     code = 'print(1/0)'
@@ -453,7 +423,6 @@ def test_python_zero_division():
     assert result.status == RunStatus.Failed
     assert 'ZeroDivisionError' in result.run_result.stderr
 
-
 def test_python_import_nonexistent_module():
     """Importing a missing module should produce ModuleNotFoundError in stderr."""
     code = 'import nonexistent_module_xyz_abc'
@@ -463,7 +432,6 @@ def test_python_import_nonexistent_module():
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Failed
     assert 'ModuleNotFoundError' in result.run_result.stderr
-
 
 def test_python_recursion_limit():
     """Hitting the recursion limit should produce an error, not hang."""
@@ -480,7 +448,6 @@ f(0)
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Failed
     assert 'RecursionError' in result.run_result.stderr
-
 
 # ---------------------------------------------------------------------------
 #  Output before crash
@@ -502,7 +469,6 @@ raise RuntimeError("boom")
     assert 'before_crash' in result.run_result.stdout
     assert 'RuntimeError' in result.run_result.stderr
 
-
 def test_cpp_output_before_nonzero_exit():
     """Stdout written before a non-zero exit should still be captured in C++."""
     code = '''
@@ -519,7 +485,6 @@ def test_cpp_output_before_nonzero_exit():
     assert result.status == RunStatus.Failed
     assert 'partial_output' in result.run_result.stdout
     assert result.run_result.return_code == 5
-
 
 # ---------------------------------------------------------------------------
 #  Stdin edge cases
@@ -539,7 +504,6 @@ print(f"len={len(data)}")
     assert result.status == RunStatus.Success
     assert 'len=0' in result.run_result.stdout
 
-
 def test_python_no_stdin_field():
     """When stdin is None (not provided), reading stdin should get EOF immediately."""
     code = '''
@@ -553,7 +517,6 @@ print(f"len={len(data)}")
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Success
     assert 'len=0' in result.run_result.stdout
-
 
 # ---------------------------------------------------------------------------
 #  Multiple files provided
@@ -583,7 +546,6 @@ print(f"{a},{b},{c['key']}")
     assert result.status == RunStatus.Success
     assert result.run_result.stdout.strip() == 'alpha,beta,value'
 
-
 # ---------------------------------------------------------------------------
 #  Concurrent execution correctness
 # ---------------------------------------------------------------------------
@@ -609,7 +571,6 @@ with open("marker.txt") as f:
     req_a = RunCodeRequest(language='python', code=code_a, run_timeout=5)
     req_b = RunCodeRequest(language='python', code=code_b, run_timeout=5)
 
-    # Run both concurrently via the sync client (TestClient handles async internally)
     resp_a = client.post('/run_code', json=req_a.model_dump())
     resp_b = client.post('/run_code', json=req_b.model_dump())
 
@@ -621,7 +582,6 @@ with open("marker.txt") as f:
     # Each should read back its own data (temp dirs are separate)
     assert result_a.run_result.stdout.strip() == 'AAAA'
     assert result_b.run_result.stdout.strip() == 'BBBB'
-
 
 # ---------------------------------------------------------------------------
 #  Compile timeout
@@ -647,7 +607,6 @@ def test_cpp_compile_timeout():
     if result.compile_result.status == CommandRunStatus.TimeLimitExceeded:
         assert result.run_result is None
 
-
 # ---------------------------------------------------------------------------
 #  Bash-specific edge cases
 # ---------------------------------------------------------------------------
@@ -664,7 +623,6 @@ def test_bash_pipe():
     assert 'hello' in lines
     assert 'world' in lines
 
-
 def test_bash_heredoc():
     """Here-document syntax in bash."""
     code = '''cat <<'ENDOFMSG'
@@ -680,7 +638,6 @@ ENDOFMSG
     assert 'line one' in result.run_result.stdout
     assert 'line two' in result.run_result.stdout
 
-
 def test_bash_stderr_redirect():
     """Bash writing to stderr only."""
     code = 'echo "error_msg" >&2'
@@ -691,7 +648,6 @@ def test_bash_stderr_redirect():
     assert result.status == RunStatus.Success
     assert 'error_msg' in result.run_result.stderr
     assert result.run_result.stdout.strip() == ''
-
 
 # ---------------------------------------------------------------------------
 #  Python: computation correctness
@@ -721,7 +677,6 @@ print(primes[-1])
     assert lines[0] == '25'  # 25 primes under 100
     assert lines[1] == '97'  # largest prime under 100
 
-
 def test_cpp_computation():
     """Verify a non-trivial C++ computation."""
     code = '''
@@ -744,7 +699,6 @@ def test_cpp_computation():
     assert result.status == RunStatus.Success
     assert result.run_result.stdout.strip() == '12586269025'  # Fib(50)
 
-
 # ---------------------------------------------------------------------------
 #  stdin + stdout combined (algorithmic problem pattern)
 # ---------------------------------------------------------------------------
@@ -765,7 +719,6 @@ print(sum(nums))
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Success
     assert result.run_result.stdout.strip() == '150'
-
 
 def test_cpp_stdin_algorithmic_problem():
     """Simulate a typical OJ problem in C++: read N integers from stdin and print their sum."""
@@ -792,7 +745,6 @@ def test_cpp_stdin_algorithmic_problem():
     assert result.status == RunStatus.Success
     assert result.run_result.stdout.strip() == '150'
 
-
 # ---------------------------------------------------------------------------
 #  Response structure invariants
 # ---------------------------------------------------------------------------
@@ -805,7 +757,6 @@ def test_response_has_run_result_on_interpreted_success():
     assert result.compile_result is None
     assert result.run_result is not None
     assert result.run_result.status == CommandRunStatus.Finished
-
 
 def test_response_has_both_results_on_compiled_success():
     """For compiled languages, both compile_result and run_result should be present."""
@@ -821,7 +772,6 @@ def test_response_has_both_results_on_compiled_success():
     assert result.compile_result.return_code == 0
     assert result.run_result is not None
     assert result.run_result.status == CommandRunStatus.Finished
-
 
 def test_compile_failure_means_no_run_result():
     """If compilation fails, run_result should be None."""

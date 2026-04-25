@@ -66,7 +66,7 @@ class RunConfig(BaseModel):
             when concurrency is managed externally, e.g. by pytest-xdist).
         docker_image : str
             Docker image used when ``isolation`` is ``"full"``.
-            Defaults to ``"ineil77/sandbox-fusion-server:24042026-4"``.
+            Defaults to ``"ineil77/sandbox-fusion-server:25042026"``.
         default_memory_limit_mb : int
             Default memory limit in megabytes for each sandbox execution.
             Overridden by per-request ``memory_limit_MB`` when > 0.
@@ -81,7 +81,7 @@ class RunConfig(BaseModel):
         """
         isolation: Literal['lite', 'full']
         max_concurrency: int
-        docker_image: str = 'ineil77/sandbox-fusion-server:24042026-4'
+        docker_image: str = 'ineil77/sandbox-fusion-server:25042026'
         default_memory_limit_mb: int = 8192
         default_cpu_limit: float = 2
         docker_startup_overhead: float = 10

@@ -17,14 +17,10 @@ Covers print output, timeout enforcement, assert() for both passing and
 failing cases, and compilation errors.
 """
 
-from fastapi.testclient import TestClient
-
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def test_swift_print():
     """Swift print should compile, run, and produce expected stdout."""
@@ -41,7 +37,6 @@ print(myString)
     assert result.status == RunStatus.Success
     assert result.compile_result.status == CommandRunStatus.Finished
     assert "Hello, World!" in result.run_result.stdout.strip()
-
 
 def test_swift_timeout():
     """DispatchQueue delay exceeding the run_timeout must be killed as TimeLimitExceeded."""
@@ -65,7 +60,6 @@ RunLoop.main.run()
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.TimeLimitExceeded
-
 
 def test_swift_assertion_success():
     """Passing Swift assert() calls with correct strlen results should succeed."""
@@ -104,7 +98,6 @@ assert(strlen(string: "asdasnakj") == 9)
     assert result.status == RunStatus.Success
     assert result.run_result.status == CommandRunStatus.Finished
 
-
 def test_swift_assertion_error():
     """A failing Swift assert() (wrong expected length) should result in Failed status."""
     request = RunCodeRequest(language='swift',
@@ -139,7 +132,6 @@ assert(strlen(string: "") == 1)
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.Finished
-
 
 def test_swift_compile_error():
     """A missing closing parenthesis should fail compilation with a non-zero return code."""

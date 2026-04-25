@@ -18,14 +18,10 @@ implementation), verifying that the runner correctly reports Success or
 Failed status after compilation and test execution.
 """
 
-from fastapi.testclient import TestClient
-
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def test_junit_pass():
     """A correct PhoneNumberCreator implementation should pass all JUnit assertions."""
@@ -102,7 +98,6 @@ class PhoneNumberCreatorTest {
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Success
     assert result.compile_result.status == CommandRunStatus.Finished
-
 
 def test_junit_fail():
     """An incorrect implementation (wrong index boundaries) should fail the JUnit tests."""

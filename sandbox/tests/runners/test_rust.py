@@ -17,14 +17,10 @@ Covers println! output, timeout enforcement, assert_eq! assertion
 errors, compilation errors, and stdin delivery.
 """
 
-from fastapi.testclient import TestClient
-
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def test_rust_print():
     """println! should compile, run, and produce expected stdout."""
@@ -42,7 +38,6 @@ def test_rust_print():
     assert result.status == RunStatus.Success
     assert result.compile_result.status == CommandRunStatus.Finished
     assert result.run_result.stdout.strip() == '123'
-
 
 def test_rust_timeout():
     """thread::sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
@@ -63,7 +58,6 @@ def test_rust_timeout():
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.TimeLimitExceeded
 
-
 def test_rust_assertion_error():
     """assert_eq! with mismatched values should produce an assertion panic in stderr."""
     request = RunCodeRequest(language='rust', code='''
@@ -77,7 +71,6 @@ def test_rust_assertion_error():
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.Finished
     assert "assertion" in result.run_result.stderr
-
 
 def test_rust_compile_error():
     """A type mismatch should fail at compilation with a non-zero return code and no run_result."""
@@ -95,7 +88,6 @@ def test_rust_compile_error():
     assert result.compile_result.status == CommandRunStatus.Finished
     assert result.compile_result.return_code != 0
     assert result.run_result is None
-
 
 def test_rust_stdin():
     """Stdin data should be delivered to the Rust program and readable via io::stdin."""

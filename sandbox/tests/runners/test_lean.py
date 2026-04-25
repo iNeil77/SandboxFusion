@@ -19,14 +19,11 @@ error.  All tests are marked ``pytest.mark.lean``.
 """
 
 import pytest
-from fastapi.testclient import TestClient
 
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 @pytest.mark.lean
 def test_lean_pass():
@@ -77,7 +74,6 @@ theorem amc12_2000_p5
     assert result.status == RunStatus.Success
     assert result.run_result.status == CommandRunStatus.Finished
     assert "declaration uses 'sorry'" in result.run_result.stdout
-
 
 @pytest.mark.lean
 def test_lean_error():

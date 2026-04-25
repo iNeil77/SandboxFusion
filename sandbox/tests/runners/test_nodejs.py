@@ -18,14 +18,10 @@ console.assert behaviour (HumanEvalX compatibility), lodash dependency
 availability, and stdin delivery.
 """
 
-from fastapi.testclient import TestClient
-
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def test_nodejs_print():
     """console.log should produce expected stdout."""
@@ -35,7 +31,6 @@ def test_nodejs_print():
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Success
     assert result.run_result.stdout.strip() == '123'
-
 
 def test_nodejs_timeout():
     """An async sleep exceeding the run_timeout must be killed as TimeLimitExceeded."""
@@ -57,7 +52,6 @@ def test_nodejs_timeout():
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.TimeLimitExceeded
 
-
 def test_nodejs_assertion_error():
     """assert.strictEqual with mismatched values should produce AssertionError in stderr."""
     request = RunCodeRequest(language='nodejs',
@@ -71,7 +65,6 @@ def test_nodejs_assertion_error():
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.Finished
     assert "AssertionError" in result.run_result.stderr
-
 
 def test_nodejs_humanevalx_assertion_error():
     """console.assert does not throw in Node.js, so status is Success but stderr has the warning.
@@ -88,7 +81,6 @@ def test_nodejs_humanevalx_assertion_error():
     assert result.run_result.status == CommandRunStatus.Finished
     assert "Assertion failed" in result.run_result.stderr
 
-
 def test_nodejs_lodash_dep():
     """The lodash package should be available and requireable in the sandbox."""
     request = RunCodeRequest(language='nodejs',
@@ -104,7 +96,6 @@ def test_nodejs_lodash_dep():
     result = RunCodeResponse(**response.json())
     print(result)
     assert result.status == RunStatus.Success
-
 
 def test_nodejs_stdin():
     """Stdin data should be delivered to the Node.js process and readable via process.stdin."""

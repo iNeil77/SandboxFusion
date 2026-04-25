@@ -17,14 +17,10 @@ Covers echo output, timeout enforcement, false-condition exit codes,
 syntax errors, reading provided files, and stdin delivery.
 """
 
-from fastapi.testclient import TestClient
-
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def test_bash_echo():
     """A simple echo command should succeed and produce the expected stdout."""
@@ -35,7 +31,6 @@ def test_bash_echo():
     assert result.status == RunStatus.Success
     assert result.run_result.stdout.strip() == 'Hello World'
 
-
 def test_bash_sleep_timeout():
     """A sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='bash', code='sleep 0.2', run_timeout=0.1)
@@ -44,7 +39,6 @@ def test_bash_sleep_timeout():
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.TimeLimitExceeded
-
 
 def test_bash_false_condition():
     """A false test condition should produce a non-zero exit code and Failed status."""
@@ -57,7 +51,6 @@ def test_bash_false_condition():
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.Finished
 
-
 def test_bash_syntax_error():
     """Invalid bash syntax should produce a syntax error in stderr and Failed status."""
     request = RunCodeRequest(language='bash', code='if [', run_timeout=5)
@@ -67,7 +60,6 @@ def test_bash_syntax_error():
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.Finished
     assert 'syntax error' in result.run_result.stderr
-
 
 def test_bash_file_read():
     """A base64-encoded file provided in the files dict should be readable via cat."""
@@ -81,7 +73,6 @@ def test_bash_file_read():
     assert result.status == RunStatus.Success
     assert result.run_result.status == CommandRunStatus.Finished
     assert 'hello, this is a test' in result.run_result.stdout
-
 
 def test_bash_stdin():
     """Stdin data should be delivered to the bash script and readable via read."""

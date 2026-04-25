@@ -17,14 +17,10 @@ Covers stdout output via fmt.Println, timeout enforcement, and stdin
 delivery via fmt.Scan.
 """
 
-from fastapi.testclient import TestClient
-
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def test_golang_print():
     """fmt.Println should compile, run, and produce expected stdout."""
@@ -48,7 +44,6 @@ def test_golang_print():
     assert result.compile_result.status == CommandRunStatus.Finished
     assert result.run_result.stdout.strip() == '123'
 
-
 def test_golang_timeout():
     """time.Sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='go',
@@ -70,7 +65,6 @@ def test_golang_timeout():
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.TimeLimitExceeded
-
 
 def test_golang_stdin():
     """Stdin data should be delivered to the Go program and readable via fmt.Scan."""

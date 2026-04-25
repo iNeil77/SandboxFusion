@@ -19,14 +19,11 @@ All tests are marked ``pytest.mark.minor``.
 """
 
 import pytest
-from fastapi.testclient import TestClient
 
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 @pytest.mark.minor
 def test_lua_print():
@@ -41,7 +38,6 @@ print("Hello, World!")
     assert result.status == RunStatus.Success
     assert result.run_result.stdout.strip() == "Hello, World!"
 
-
 @pytest.mark.minor
 def test_lua_timeout():
     """os.execute('sleep') exceeding the run_timeout must be killed as TimeLimitExceeded."""
@@ -53,7 +49,6 @@ os.execute("sleep 3")
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.TimeLimitExceeded
-
 
 @pytest.mark.minor
 def test_lua_assertion_success():
@@ -67,7 +62,6 @@ lu.assertEquals(0, 0)
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Success
     assert result.run_result.status == CommandRunStatus.Finished
-
 
 @pytest.mark.minor
 def test_lua_assertion_error():

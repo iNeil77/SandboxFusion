@@ -24,14 +24,11 @@ import base64
 import os
 
 import pytest
-from fastapi.testclient import TestClient
 
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def get_dir_files():
     """Load all files from the verilog samples directory as base64-encoded strings."""
@@ -48,7 +45,6 @@ def get_dir_files():
             file_contents[filename] = base64_content
 
     return file_contents
-
 
 @pytest.mark.verilog
 def test_verilog_basic():
@@ -74,14 +70,12 @@ module reference_module(
 
 endmodule
 
-
 module stimulus_gen (
 	input clk,
 	output reg a, b,
 	output reg[511:0] wavedrom_title,
 	output reg wavedrom_enable
 );
-
 
 // Add two ports to module stimulus_gen:
 //    output [511:0] wavedrom_title
@@ -93,8 +87,6 @@ module stimulus_gen (
 	task wavedrom_stop;
 		#1;
 	endtask
-
-
 
 	initial begin
 		int count; count = 0;
@@ -127,7 +119,6 @@ module tb();
 
 	stats stats1;
 
-
 	wire[511:0] wavedrom_title;
 	wire wavedrom_enable;
 	int wavedrom_hide_after_time;
@@ -147,7 +138,6 @@ module tb();
 		$dumpfile("wave.vcd");
 		$dumpvars(1, stim1.clk, tb_mismatch ,a,b,out_assign_ref,out_assign_dut,out_alwaysblock_ref,out_alwaysblock_dut );
 	end
-
 
 	wire tb_match;		// Verification
 	wire tb_mismatch = ~tb_match;
@@ -169,7 +159,6 @@ module tb();
 		.out_assign(out_assign_dut),
 		.out_alwaysblock(out_alwaysblock_dut) );
 
-
 	bit strobe = 0;
 	task wait_for_end_of_timestep;
 		repeat(5) begin
@@ -177,7 +166,6 @@ module tb();
 			@(strobe);
 		end
 	endtask
-
 
 	final begin
 		if (stats1.errors_out_assign) $display("Hint: Output '%s' has %0d mismatches. First mismatch occurred at time %0d.", "out_assign", stats1.errors_out_assign, stats1.errortime_out_assign);

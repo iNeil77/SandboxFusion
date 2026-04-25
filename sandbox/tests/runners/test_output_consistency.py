@@ -22,20 +22,15 @@ Each test runs the same request N times and asserts that every response
 matches the first.
 """
 
-from fastapi.testclient import TestClient
-
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def _run_request(request: RunCodeRequest) -> RunCodeResponse:
     response = client.post('/run_code', json=request.model_dump())
     assert response.status_code == 200
     return RunCodeResponse(**response.json())
-
 
 def _assert_all_identical(results: list[RunCodeResponse], check_stdout=True, check_stderr=False):
     """Assert that all results share the same status, stdout, and optionally stderr."""
@@ -51,7 +46,6 @@ def _assert_all_identical(results: list[RunCodeResponse], check_stdout=True, che
                 f"Run {i}: stderr differs\n  expected: {first.run_result.stderr!r}\n  got:      {r.run_result.stderr!r}"
             )
 
-
 # ---------------------------------------------------------------------------
 #  Python: deterministic output
 # ---------------------------------------------------------------------------
@@ -63,7 +57,6 @@ def test_python_print_consistency():
     results = [_run_request(request) for _ in range(n)]
     _assert_all_identical(results)
     assert results[0].run_result.stdout.strip() == 'deterministic_output_12345'
-
 
 def test_python_computation_consistency():
     """A pure computation must produce identical results across repeated runs."""
@@ -79,7 +72,6 @@ print(digest)
     _assert_all_identical(results)
     assert len(results[0].run_result.stdout.strip()) == 64
 
-
 def test_python_multiline_output_consistency():
     """Multi-line structured output must be identical across runs."""
     n = 25
@@ -93,7 +85,6 @@ for i in range(20):
     lines = results[0].run_result.stdout.strip().split('\n')
     assert len(lines) == 20
 
-
 def test_python_sorted_output_consistency():
     """Sorted collection output must be stable across runs."""
     n = 25
@@ -105,7 +96,6 @@ print(json.dumps(data, sort_keys=True))
     request = RunCodeRequest(language='python', code=code, run_timeout=10)
     results = [_run_request(request) for _ in range(n)]
     _assert_all_identical(results)
-
 
 def test_python_stdin_consistency():
     """Same stdin must produce the same output every time."""
@@ -122,7 +112,6 @@ print(total)
     _assert_all_identical(results)
     assert results[0].run_result.stdout.strip() == str(sum(range(1, 51)))
 
-
 def test_python_numpy_consistency():
     """Seeded NumPy operations must produce identical results."""
     n = 20
@@ -137,7 +126,6 @@ print(f"{arr.sum():.10f}")
     request = RunCodeRequest(language='python', code=code, run_timeout=10)
     results = [_run_request(request) for _ in range(n)]
     _assert_all_identical(results)
-
 
 # ---------------------------------------------------------------------------
 #  C++: deterministic output
@@ -160,7 +148,6 @@ def test_cpp_computation_consistency():
     _assert_all_identical(results)
     assert results[0].run_result.stdout.strip() == '333383335000'
 
-
 def test_cpp_string_output_consistency():
     """Formatted string output in C++ must be stable across runs."""
     n = 20
@@ -180,7 +167,6 @@ def test_cpp_string_output_consistency():
     results = [_run_request(request) for _ in range(n)]
     _assert_all_identical(results)
 
-
 # ---------------------------------------------------------------------------
 #  Bash: deterministic output
 # ---------------------------------------------------------------------------
@@ -197,7 +183,6 @@ done
     results = [_run_request(request) for _ in range(n)]
     _assert_all_identical(results)
 
-
 # ---------------------------------------------------------------------------
 #  Error output consistency
 # ---------------------------------------------------------------------------
@@ -206,7 +191,6 @@ def _normalize_stderr(stderr: str) -> str:
     """Strip temp directory paths and filenames from stderr so comparisons ignore path variance."""
     import re
     return re.sub(r'/tmp/[^\s"\',:]+\.\w+', '/tmp/TMP_FILE', stderr)
-
 
 def test_python_error_consistency():
     """The same error must produce the same error type and message across runs."""
@@ -223,7 +207,6 @@ def test_python_error_consistency():
             f"Run {i}: stderr differs after path normalization"
         )
 
-
 def test_cpp_compile_error_consistency():
     """The same compile error must produce the same error message across runs."""
     n = 15
@@ -239,7 +222,6 @@ def test_cpp_compile_error_consistency():
             f"Run {i}: compile stderr differs after path normalization"
         )
 
-
 # ---------------------------------------------------------------------------
 #  Return code consistency
 # ---------------------------------------------------------------------------
@@ -253,7 +235,6 @@ def test_python_exit_code_consistency():
         assert r.status == RunStatus.Failed
         assert r.run_result.return_code == 13
 
-
 def test_cpp_return_code_consistency():
     """C++ main returning N must return the same code every time."""
     n = 15
@@ -264,7 +245,6 @@ def test_cpp_return_code_consistency():
         assert r.status == RunStatus.Failed
         assert r.compile_result.return_code == 0
         assert r.run_result.return_code == 7
-
 
 # ---------------------------------------------------------------------------
 #  File round-trip consistency
@@ -286,7 +266,6 @@ print("done")
     for r in results[1:]:
         assert r.files['out.txt'] == first_file
 
-
 # ---------------------------------------------------------------------------
 #  Execution time stability (no pathological variance)
 # ---------------------------------------------------------------------------
@@ -302,7 +281,6 @@ def test_python_execution_time_stability():
     # No single run should take more than 10x the average
     for t in times:
         assert t < avg * 10, f"Execution time {t:.3f}s is >10x the average {avg:.3f}s"
-
 
 # ---------------------------------------------------------------------------
 #  Cross-language consistency

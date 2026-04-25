@@ -13,48 +13,146 @@
 # limitations under the License.
 """Pytest configuration hooks for the SandboxFusion test suite.
 
-Handles two responsibilities:
+Tests always run against a real server inside a Docker container,
+mirroring production.  The ``--sandbox-docker`` option (required)
+selects the isolation backend:
 
-1. Setting a ``sandbox._called_from_test`` flag so that production code
-   can detect when it is running inside the test harness (e.g. to use
-   lighter-weight resource defaults).
-2. Initialising structured logging early so that log output from runners
-   and datasets is captured consistently during test runs.
+* ``full`` — Docker-in-Docker via the host Docker socket.
+* ``lite`` — privileged container with overlayfs + chroot + cgroups.
 """
+
+import os
+import shutil
+import subprocess
+import tempfile
+import time
+
+import pytest
+
+_container_name: str | None = None
+_workdir: str | None = None
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        '--sandbox-docker',
+        action='store',
+        default=None,
+        metavar='MODE',
+        help='Start the sandbox server in a Docker container before tests. '
+             'MODE is the isolation backend: "lite" or "full". Required.',
+    )
+
+
+def _is_xdist_worker(config) -> bool:
+    return hasattr(config, 'workerinput')
 
 
 def pytest_configure(config):
-    """Set the test-mode flag on the sandbox package and configure logging.
+    docker_mode = config.getoption('--sandbox-docker', default=None)
+    if docker_mode is None and os.environ.get('SANDBOX_TEST_DOCKER'):
+        docker_mode = os.environ['SANDBOX_TEST_DOCKER']
 
-    Called by pytest before test collection begins.  Sets
-    ``sandbox._called_from_test = True`` so that runtime code can adapt
-    its behaviour for testing, then initialises structured logging via
-    :func:`sandbox.utils.logging.configure_logging`.
-
-    Also runs a startup sweep to clean orphaned sandbox resources
-    (overlays, cgroups, network namespaces) left behind by prior
-    crashes or SIGKILL'd test runs.
-    """
-    import sandbox
-    sandbox._called_from_test = True
-    from sandbox.utils.logging import configure_logging
-    configure_logging()
-    from sandbox.runners.isolation import cleanup_orphaned_sandboxes
-    cleanup_orphaned_sandboxes()
+    if docker_mode and not _is_xdist_worker(config):
+        _start_docker_server(docker_mode)
+    elif not _is_xdist_worker(config) and not os.environ.get('SANDBOX_TEST_SERVER_URL'):
+        raise pytest.UsageError(
+            'Tests require --sandbox-docker full or --sandbox-docker lite.')
 
 
 def pytest_unconfigure(config):
-    """Clean up after all tests have finished.
+    if not _is_xdist_worker(config):
+        _stop_docker_server()
 
-    Called by pytest during shutdown.  Runs a final sweep for any sandbox
-    resources leaked during this test session, then removes the test-mode
-    flag.
-    """
+
+def _start_docker_server(mode: str):
+    global _container_name, _workdir
+    import secrets
+    _container_name = f'sandbox_test_{secrets.token_hex(4)}'
+
+    image = 'ineil77/sandbox-fusion-server:25042026'
+    port = int(os.environ.get('SANDBOX_TEST_PORT', '18080'))
+
+    cmd = [
+        'docker', 'run', '-d',
+        '--name', _container_name,
+        '-p', f'{port}:8080',
+        '--memory', '16g',
+        '--cpus', '8',
+        '--pids-limit', '4096',
+    ]
+
+    if mode == 'full':
+        _workdir = tempfile.mkdtemp(prefix='sandbox_work_')
+        os.chmod(_workdir, 0o777)
+        cmd += [
+            '-v', '/var/run/docker.sock:/var/run/docker.sock',
+            '-v', f'{_workdir}:{_workdir}',
+            '-e', f'SANDBOX_TMP_DIR={_workdir}',
+            '-e', 'SANDBOX_CONFIG=docker_full',
+        ]
+    elif mode == 'lite':
+        cmd += [
+            '--privileged',
+            '-e', 'SANDBOX_CONFIG=docker_lite',
+        ]
+    else:
+        raise ValueError(f'--sandbox-docker must be "lite" or "full", got {mode!r}')
+
+    cmd.append(image)
+
+    print(f'\n--- Starting sandbox server container ({mode} mode): {_container_name} ---')
+    subprocess.run(cmd, check=True, timeout=30)
+
+    url = f'http://localhost:{port}'
+    os.environ['SANDBOX_TEST_SERVER_URL'] = url
+    os.environ['SANDBOX_ISOLATION_MODE'] = mode
+
+    from sandbox.tests import client as client_mod
+    import httpx
+    client_mod.client = httpx.Client(base_url=url, timeout=120)
+
+    _wait_for_server(url, timeout=120)
+    print(f'--- Server ready at {url} ---\n')
+
+
+def _wait_for_server(url: str, timeout: float):
+    import httpx
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            r = httpx.get(f'{url}/v1/ping', timeout=5)
+            if r.status_code == 200:
+                return
+        except Exception:
+            pass
+        time.sleep(2)
+    raise TimeoutError(f'Sandbox server at {url} did not become healthy within {timeout}s')
+
+
+def _stop_docker_server():
+    global _container_name, _workdir
+    if _container_name is None:
+        return
+    name = _container_name
+    _container_name = None
+    print(f'\n--- Stopping sandbox server container: {name} ---')
     try:
-        from sandbox.runners.isolation import cleanup_orphaned_sandboxes
-        cleanup_orphaned_sandboxes()
+        subprocess.run(
+            ['docker', 'logs', '--tail', '50', name],
+            timeout=10,
+        )
     except Exception:
         pass
-    import sandbox
-    if hasattr(sandbox, '_called_from_test'):
-        del sandbox._called_from_test
+    try:
+        subprocess.run(
+            ['docker', 'rm', '-f', name],
+            timeout=30,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        pass
+    if _workdir and os.path.isdir(_workdir):
+        shutil.rmtree(_workdir, ignore_errors=True)
+        _workdir = None

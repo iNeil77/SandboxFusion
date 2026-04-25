@@ -17,14 +17,10 @@ Covers echo output, timeout enforcement, E_USER_ERROR triggering, and
 stdin delivery via readline.
 """
 
-from fastapi.testclient import TestClient
-
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def test_php_print():
     """PHP echo should produce expected stdout."""
@@ -38,7 +34,6 @@ def test_php_print():
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Success
     assert result.run_result.stdout.strip() == '123'
-
 
 def test_php_timeout():
     """sleep(2) exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
@@ -55,7 +50,6 @@ def test_php_timeout():
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.TimeLimitExceeded
 
-
 def test_php_error():
     """trigger_error with E_USER_ERROR should produce the error message and a Failed status."""
     request = RunCodeRequest(language='php',
@@ -69,7 +63,6 @@ def test_php_error():
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Failed
     assert "Custom error" in result.run_result.stderr + result.run_result.stdout
-
 
 def test_php_stdin():
     """Stdin data should be delivered to the PHP process and readable via readline."""

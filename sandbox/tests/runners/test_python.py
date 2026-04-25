@@ -19,17 +19,14 @@ stdin delivery, and fetching output files after execution.
 """
 
 import base64
+import os
 
 import pytest
-from fastapi.testclient import TestClient
 
-from sandbox.configs.run_config import RunConfig
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def test_python_print():
     """Simple print statement should succeed and produce the expected stdout."""
@@ -40,7 +37,6 @@ def test_python_print():
     assert result.status == RunStatus.Success
     assert result.run_result.stdout.strip() == '123'
 
-
 def test_python_timeout():
     """A sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
     request = RunCodeRequest(language='python', code='import time; time.sleep(0.2)', run_timeout=0.1)
@@ -49,7 +45,6 @@ def test_python_timeout():
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.TimeLimitExceeded
-
 
 def test_python_assertion_error():
     """A failing assert should produce AssertionError in stderr and a Failed status."""
@@ -61,7 +56,6 @@ def test_python_assertion_error():
     assert result.run_result.status == CommandRunStatus.Finished
     assert 'AssertionError' in result.run_result.stderr
 
-
 def test_python_syntax_error():
     """Invalid Python syntax should produce SyntaxError in stderr and a Failed status."""
     request = RunCodeRequest(language='python', code='int a = 1', run_timeout=5)
@@ -71,7 +65,6 @@ def test_python_syntax_error():
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.Finished
     assert 'SyntaxError: invalid syntax' in result.run_result.stderr
-
 
 def test_python_file_read():
     """A base64-encoded file provided in the files dict should be readable at the given path."""
@@ -86,7 +79,6 @@ def test_python_file_read():
     assert result.run_result.status == CommandRunStatus.Finished
     assert 'hello, this is a test' in result.run_result.stdout
 
-
 def test_python_stdin():
     """Stdin data should be delivered to the program and readable via input()."""
     request = RunCodeRequest(language='python', code='print(int(input()))', run_timeout=5, stdin='65535')
@@ -96,7 +88,6 @@ def test_python_stdin():
     assert result.status == RunStatus.Success
     assert result.run_result.status == CommandRunStatus.Finished
     assert result.run_result.stdout == '65535\n'
-
 
 def test_python_fetch_files():
     """Files written during execution should be retrievable via fetch_files as base64."""
@@ -111,9 +102,8 @@ def test_python_fetch_files():
     assert result.run_result.status == CommandRunStatus.Finished
     assert base64.b64decode(result.files['a.txt'].encode()).decode() == 'secret'
 
-
 @pytest.mark.skipif(
-    RunConfig.get_instance_sync().sandbox.isolation == 'full',
+    os.environ.get('SANDBOX_ISOLATION_MODE') == 'full',
     reason='Full mode only bind-mounts the working directory; absolute paths outside cwd are not retrievable')
 def test_python_fetch_files_absolute_path():
     """Files written to absolute paths should be retrievable in lite mode via overlayfs."""

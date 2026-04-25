@@ -31,13 +31,10 @@ import os
 import random
 
 import pytest
-from fastapi.testclient import TestClient
 
-from sandbox.configs.run_config import RunConfig
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
+from sandbox.tests.client import client
 
 SERVER_1 = '''
 import http.server
@@ -162,7 +159,6 @@ def test_network_access():
 test_network_access()
 '''
 
-
 def test_isolation_network_server_127():
     """Verify that a Python HTTP server bound to 127.0.0.1 is reachable within the sandbox.
 
@@ -180,7 +176,6 @@ def test_isolation_network_server_127():
     assert result.status == RunStatus.Success
     assert 'Test Passed' in result.run_result.stdout
 
-
 def test_isolation_network_server_localhost():
     """Verify that a Python HTTP server bound to localhost is reachable within the sandbox.
 
@@ -196,7 +191,6 @@ def test_isolation_network_server_localhost():
     print(result.model_dump_json(indent=2))
     assert result.status == RunStatus.Success
     assert 'Test Passed' in result.run_result.stdout
-
 
 async def test_isolation_network_server_port_conflict():
     """Verify that two concurrent servers on the same port do not conflict.
@@ -221,9 +215,8 @@ async def test_isolation_network_server_port_conflict():
         assert result.status == RunStatus.Success
         assert 'Test Passed' in result.run_result.stdout
 
-
 @pytest.mark.skipif(
-    RunConfig.get_instance_sync().sandbox.isolation == 'full',
+    os.environ.get('SANDBOX_ISOLATION_MODE') == 'full',
     reason='Full mode uses --network none which blocks all egress traffic')
 @pytest.mark.skipif(
     os.environ.get('PYTEST_XDIST_WORKER') is not None,

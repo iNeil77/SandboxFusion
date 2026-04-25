@@ -22,20 +22,15 @@ interference.
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from fastapi.testclient import TestClient
-
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def _run_request(request: RunCodeRequest) -> RunCodeResponse:
     response = client.post('/run_code', json=request.model_dump())
     assert response.status_code == 200
     return RunCodeResponse(**response.json())
-
 
 # ---------------------------------------------------------------------------
 #  Parallel request handling
@@ -53,7 +48,6 @@ def test_parallel_python_requests():
     for result in results:
         assert result.status == RunStatus.Success
         assert result.run_result.stdout.strip() == '1764'
-
 
 def test_parallel_cpp_requests():
     """Fire 10 identical C++ requests in parallel; all must compile and produce correct output."""
@@ -78,7 +72,6 @@ def test_parallel_cpp_requests():
         assert result.compile_result.status == CommandRunStatus.Finished
         assert result.run_result.stdout.strip() == '5050'
 
-
 def test_parallel_requests_with_unique_inputs():
     """Each parallel request receives a distinct input and must produce the matching output."""
     n = 20
@@ -93,7 +86,6 @@ def test_parallel_requests_with_unique_inputs():
             assert result.status == RunStatus.Success
             assert result.run_result.stdout.strip() == str(i ** 2)
 
-
 def test_parallel_requests_with_stdin():
     """Parallel requests each with different stdin must route input correctly."""
     n = 15
@@ -106,7 +98,6 @@ def test_parallel_requests_with_stdin():
             result = future.result()
             assert result.status == RunStatus.Success
             assert result.run_result.stdout.strip() == str(i * 3)
-
 
 # ---------------------------------------------------------------------------
 #  Mixed-language parallel workload
@@ -137,7 +128,6 @@ def test_mixed_language_parallel():
             assert result.status == RunStatus.Success
             assert result.run_result.stdout.strip() == expected
 
-
 # ---------------------------------------------------------------------------
 #  Sustained sequential load
 # ---------------------------------------------------------------------------
@@ -150,7 +140,6 @@ def test_sustained_sequential_load():
         result = _run_request(request)
         assert result.status == RunStatus.Success
         assert result.run_result.stdout.strip() == str(i)
-
 
 # ---------------------------------------------------------------------------
 #  Parallel failures should not poison other requests
@@ -185,7 +174,6 @@ def test_parallel_mix_of_success_and_failure():
                 assert result.status == RunStatus.Failed
                 assert result.run_result.status == CommandRunStatus.TimeLimitExceeded
 
-
 # ---------------------------------------------------------------------------
 #  No request drops under burst
 # ---------------------------------------------------------------------------
@@ -201,7 +189,6 @@ def test_burst_all_responses_received():
     assert len(results) == n
     success_count = sum(1 for r in results if r.status == RunStatus.Success)
     assert success_count == n
-
 
 # ---------------------------------------------------------------------------
 #  File isolation under parallel load

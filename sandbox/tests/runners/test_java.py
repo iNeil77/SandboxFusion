@@ -18,14 +18,10 @@ errors (both ``throw new AssertionError`` and ``assert`` keyword),
 external JAR dependencies (javatuples), and stdin delivery.
 """
 
-from fastapi.testclient import TestClient
-
 from sandbox.runners import CommandRunStatus
 from sandbox.server.sandbox_api import RunCodeRequest, RunCodeResponse, RunStatus
-from sandbox.server.server import app
 
-client = TestClient(app)
-
+from sandbox.tests.client import client
 
 def test_java_print():
     """System.out.println should compile, run, and produce expected stdout."""
@@ -44,7 +40,6 @@ def test_java_print():
     assert result.compile_result.status == CommandRunStatus.Finished
     assert result.run_result.stdout.strip() == '123'
 
-
 def test_java_compile_error():
     """A typo in System.out should cause a compilation failure with no run_result."""
     request = RunCodeRequest(language='java',
@@ -62,7 +57,6 @@ def test_java_compile_error():
     assert result.compile_result.status == CommandRunStatus.Finished
     assert result.compile_result.return_code != 0
     assert result.run_result is None
-
 
 def test_java_timeout():
     """Thread.sleep exceeding the run_timeout must be killed and reported as TimeLimitExceeded."""
@@ -85,7 +79,6 @@ def test_java_timeout():
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.TimeLimitExceeded
 
-
 def test_java_assertion_error():
     """Throwing AssertionError should produce the error in stderr and a Failed status."""
     request = RunCodeRequest(language='java',
@@ -103,7 +96,6 @@ def test_java_assertion_error():
     assert result.run_result.status == CommandRunStatus.Finished
     assert "java.lang.AssertionError" in result.run_result.stderr
 
-
 def test_java_assert():
     """The Java assert keyword with -ea should fail when the condition is false."""
     request = RunCodeRequest(language='java',
@@ -119,7 +111,6 @@ def test_java_assert():
     result = RunCodeResponse(**response.json())
     assert result.status == RunStatus.Failed
     assert result.run_result.status == CommandRunStatus.Finished
-
 
 def test_java_external_jar():
     """The javatuples external JAR should be on the classpath and usable at runtime."""
@@ -155,7 +146,6 @@ def test_java_external_jar():
     assert result.status == RunStatus.Success
     assert result.run_result.status == CommandRunStatus.Finished
     assert 'Fruit: banana, Quantity: 2, Price: 0.99' in result.run_result.stdout
-
 
 def test_java_stdin():
     """Stdin data should be delivered to the Java program and readable via Scanner."""
