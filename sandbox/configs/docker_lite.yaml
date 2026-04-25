@@ -7,7 +7,7 @@
 sandbox:
   isolation: lite
   max_concurrency: 16
-  docker_image: ineil77/sandbox-fusion-server:25042026
+  docker_image: ineil77/sandbox-fusion-server:25042026-2
   default_memory_limit_mb: 8192
   default_cpu_limit: 2
 

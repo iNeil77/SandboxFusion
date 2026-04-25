@@ -56,9 +56,9 @@ Supported languages:
 Build and run with all runtimes pre-installed:
 
 ```bash
-make build-base-image       # builds ineil77/sandbox-fusion-base:25042026 (all language runtimes)
-make build-server-image     # builds ineil77/sandbox-fusion-server:25042026 (app + deps)
-docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:25042026
+make build-base-image       # builds ineil77/sandbox-fusion-base:25042026-2 (all language runtimes)
+make build-server-image     # builds ineil77/sandbox-fusion-server:25042026-2 (app + deps)
+docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:25042026-2
 ```
 
 ### Manual (Linux only, for lite isolation)
@@ -111,23 +111,34 @@ curl -X POST http://localhost:8080/submit \
 
 ## Development
 
-Run all unit tests:
+### Prerequisites
+
+Tests require Docker and the server image:
 
 ```bash
-make test
+make build-base-image       # one-time, ~20 min
+make build-server-image     # rebuild after code changes
 ```
 
-Run a specific unit test (allows you to see stdout):
+### Running Tests
+
+Tests always run against a real server inside a Docker container, mirroring production. The test harness starts a container, runs all tests, and tears it down automatically.
 
 ```bash
-make test-case CASE=test_java_assert
+make test                                    # default: full (Docker-in-Docker) mode, 16 parallel workers
+make test-docker-lite                        # lite (overlayfs + cgroups) mode
+make test-docker-full                        # full mode (same as `make test`)
+make test-case CASE=test_python MODE=full    # single test with stdout visible
+make test-case CASE=test_java MODE=lite      # single test in lite mode
 ```
 
-Format the code:
+Override the number of parallel workers:
 
 ```bash
-make format
+make test-docker-full TEST_NP=8
 ```
+
+See [Testing Guide](documentation/testing.md) for details on test architecture, writing new tests, and debugging failures.
 
 ## License
 

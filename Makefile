@@ -14,10 +14,10 @@ install-runtimes:
 	cd runtime/lean && lake build
 
 build-base-image:
-	docker build . -f scripts/Dockerfile.base -t ineil77/sandbox-fusion-base:25042026
+	docker build . -f scripts/Dockerfile.base -t ineil77/sandbox-fusion-base:25042026-2
 
 build-server-image:
-	docker build . -f scripts/Dockerfile.server -t ineil77/sandbox-fusion-server:25042026
+	docker build . -f scripts/Dockerfile.server -t ineil77/sandbox-fusion-server:25042026-2
 
 test: test-docker-full
 

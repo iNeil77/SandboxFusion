@@ -31,9 +31,9 @@ SandboxFusion/
 │   │   └── __init__.py           #     Re-exports types
 │   ├── configs/                  #   YAML-driven configuration
 │   │   ├── run_config.py         #     RunConfig pydantic model (singleton)
-│   │   ├── local.yaml            #     Local dev: isolation=lite, 34 concurrent runners
-│   │   ├── ci.yaml               #     CI: isolation=lite, concurrency from pytest-xdist
-│   │   └── full_test.yaml        #     Full Docker mode: isolation=full, max_concurrency=0
+│   │   ├── local.yaml            #     Local dev: isolation=lite, 16 concurrent runners
+│   │   ├── docker_full.yaml      #     Full (Docker-in-Docker) isolation, 16 concurrent
+│   │   └── docker_lite.yaml      #     Lite isolation inside Docker, 16 concurrent
 │   ├── utils/                    #   Shared utilities
 │   │   ├── sandbox_client.py     #     run_code_in_sandbox() with retry logic
 │   │   ├── execution.py          #     Concurrency control, process tree management
@@ -61,6 +61,7 @@ SandboxFusion/
 │   └── lean/                     #     Lean4 lakefile & toolchain
 ├── docs/                         #   Docusaurus documentation site
 ├── pyproject.toml                #   Poetry config & dependencies
+├── conftest.py                   #   Pytest hooks: Docker container lifecycle for tests
 ├── Makefile                      #   Build, run, test, format targets
 └── README.md
 ```
@@ -85,7 +86,7 @@ SandboxFusion/
 
 ### Dev Dependencies
 
-`pytest`, `pytest-asyncio`, `pytest-xdist` (parallel tests), `pytest-mock`, `pytest-cov`, `httpx`, `numpy`, `yapf`, `isort`, `pycln`, `mypy`
+`pytest`, `pytest-asyncio`, `pytest-xdist` (parallel tests), `pytest-mock`, `pytest-cov`, `httpx` (test client), `numpy`, `yapf`, `isort`, `pycln`, `mypy`
 
 ### External Language Runtimes (installed via Dockerfile.base)
 
@@ -146,14 +147,14 @@ Both modes require Linux. `lite` requires root (sudo) for overlayfs/cgroups. `fu
 ### Configuration
 
 Controlled by YAML files selected via `SANDBOX_CONFIG` env var (default: `local`):
-- **`local.yaml`**: Lite isolation, max 34 concurrent runners, max 3 eval runner concurrency
-- **`ci.yaml`**: Lite isolation, max concurrency 0 (unlimited, controlled by pytest-xdist workers)
-- **`full_test.yaml`**: Full (Docker) isolation, max concurrency 0, for testing full mode
+- **`local.yaml`**: Lite isolation, max 16 concurrent, max 3 eval runner concurrency
+- **`docker_full.yaml`**: Full (Docker-in-Docker) isolation, max concurrency 16, for testing full mode
+- **`docker_lite.yaml`**: Lite isolation inside Docker, max concurrency 16, for testing lite mode
 
 Key config sections:
 - `sandbox.isolation`: `lite` | `full`
 - `sandbox.max_concurrency`: Limits simultaneous code executions
-- `sandbox.docker_image`: Docker image for `full` mode (default: `ineil77/sandbox-fusion-server:25042026`)
+- `sandbox.docker_image`: Docker image for `full` mode (default: `ineil77/sandbox-fusion-server:25042026-2`)
 - `sandbox.docker_startup_overhead`: Extra seconds added to timeouts in full mode for container startup (default: 10)
 - `eval.max_runner_concurrency`: Limits parallel test case runners (0 = unlimited)
 - `common.logging_color`: Colored structlog output
@@ -254,7 +255,7 @@ This single-container architecture is what makes lite mode faster than full mode
 
 3. **Network: network namespaces** (`tmp_netns()` in `isolation.py`)
    - A unique network namespace is created via `create_net_namespace.sh`, which sets up a veth pair bridging the namespace to the host with NAT masquerading, or creates a namespace with only loopback if `--no-bridge` is passed.
-   - Subnets are drawn from a pre-computed pool of 4,096 `/24` ranges in `172.16.0.0/12`. When running under `pytest-xdist`, the pool is partitioned by worker ID to prevent conflicts.
+   - Subnets are drawn from a pre-computed pool of 4,096 `/24` ranges in `172.16.0.0/12`.
    - The command chain includes `ip netns exec <ns>` to enter the namespace.
 
 4. **PID isolation: unshare** (in `run_commands()` in `base.py`)
@@ -394,7 +395,7 @@ docker run --rm -i --name sandbox_a1b2c3d4 --memory 8192m --cpus 2 --network non
 
 **Overhead:** ~500 ms+ per execution (Docker daemon overhead, image layer setup, container creation/teardown).
 
-**Important:** The Docker image used must contain all language toolchains. The default is `ineil77/sandbox-fusion-server:25042026`, which extends the base image with all runtimes pre-built.
+**Important:** The Docker image used must contain all language toolchains. The default is `ineil77/sandbox-fusion-server:25042026-2`, which extends the base image with all runtimes pre-built.
 
 ### Server Async Execution Model
 
@@ -437,7 +438,7 @@ Incoming HTTP Request
            |
            v
 +----------------------------------+
-|  sandbox.max_concurrency         |  asyncio.Semaphore(34)
+|  sandbox.max_concurrency         |  asyncio.Semaphore(16)
 |  Limits total active sandbox     |  Queues excess requests (no rejection)
 |  instances across all requests   |
 +----------+-----------------------+
@@ -452,20 +453,20 @@ Incoming HTTP Request
            v  (lite mode only)
 +----------------------------------+
 |  Network namespace pool          |  4,096 subnets in 172.16.0.0/12
-|  Blocks with await sleep(0.5)    |  (256 per pytest-xdist worker)
+|  Blocks with await sleep(0.5)    |
 |  until a subnet is available     |
 +----------------------------------+
 ```
 
 | Layer | Mechanism | Config | Default |
 |-------|-----------|--------|---------|
-| **Sandbox execution** | `asyncio.Semaphore` in `sandbox_api.py:run_code()` | `sandbox.max_concurrency` | 34 |
+| **Sandbox execution** | `asyncio.Semaphore` in `sandbox_api.py:run_code()` | `sandbox.max_concurrency` | 16 |
 | **Eval test runners** | `asyncio.Semaphore` applied dynamically | `eval.max_runner_concurrency` | 3 (local), 0=unlimited (CI) |
 | **Network namespaces** | Pool of 4,096 subnets (lite mode only) | Hardcoded | 4,096 concurrent |
 
 **Important:** The `max_concurrency` semaphore gates the `run_code()` HTTP handler (wrapping the runner dispatch), not individual subprocess calls. For `/submit`, each test case independently acquires the `max_runner_concurrency` semaphore, and the inner `run_code_in_sandbox()` call then contends for the `max_concurrency` semaphore. This means a single `/submit` request with 100 test cases can occupy up to `min(max_runner_concurrency, max_concurrency)` sandbox slots simultaneously.
 
-**SDK has zero concurrency control.** Neither the sync nor async client implements any client-side rate limiting, connection pooling caps, or backpressure. If you fire 1,000 `asyncio.gather(run_code(...))` calls, the SDK opens 1,000 HTTP connections to the server simultaneously. The server accepts all of them (uvicorn has no connection limit by default), and all 1,000 requests queue behind the `max_concurrency` semaphore. Only 34 execute at a time; the other 966 hold open connections and await their semaphore turn.
+**SDK has zero concurrency control.** Neither the sync nor async client implements any client-side rate limiting, connection pooling caps, or backpressure. If you fire 1,000 `asyncio.gather(run_code(...))` calls, the SDK opens 1,000 HTTP connections to the server simultaneously. The server accepts all of them (uvicorn has no connection limit by default), and all 1,000 requests queue behind the `max_concurrency` semaphore. Only 16 execute at a time; the other 984 hold open connections and await their semaphore turn.
 
 This has implications:
 - **Memory:** Each queued request holds an open TCP connection, asyncio task, and request payload in server memory. At 10,000 concurrent requests, this can consume several GB of server RAM before any code even executes.
@@ -474,7 +475,7 @@ This has implications:
 
 ```python
 # Recommended: client-side semaphore to avoid overwhelming the server
-sem = asyncio.Semaphore(34)  # Match server's max_concurrency
+sem = asyncio.Semaphore(16)  # Match server's max_concurrency
 async def rate_limited_run(req):
     async with sem:
         return await async_client.run_code(req)
@@ -483,21 +484,21 @@ results = await asyncio.gather(*[rate_limited_run(r) for r in requests])
 
 ### Concurrency Under Parallel Load
 
-**Lite mode — 34 concurrent requests:**
+**Lite mode — 16 concurrent requests:**
 
-1. All 34 requests enter the event loop simultaneously.
-2. Each acquires the `max_concurrency` semaphore (34 slots — all proceed).
+1. All 16 requests enter the event loop simultaneously.
+2. Each acquires the `max_concurrency` semaphore (16 slots — all proceed).
 3. Each creates a fresh overlayfs mount, cgroup, and network namespace in parallel (each creation is ~3-5 `sudo` subprocess calls, all async — while execution A waits for `sudo mount` to return, execution B's `sudo cgcreate` is already running).
-4. The 34 compile/run subprocesses execute concurrently, each in its own isolation envelope.
+4. The 16 compile/run subprocesses execute concurrently, each in its own isolation envelope.
 5. As each completes, its overlay/cgroup/netns are torn down and resources released.
-6. Request #35 arrives — it awaits the semaphore briefly, then creates fresh isolation resources (~100ms setup).
+6. Request #17 arrives — it awaits the semaphore briefly, then creates fresh isolation resources (~100ms setup).
 
-**Full mode — 34 concurrent requests:**
+**Full mode — 16 concurrent requests:**
 
-1. All 34 requests enter the event loop simultaneously.
+1. All 16 requests enter the event loop simultaneously.
 2. Each constructs a `docker run` command and spawns it via `asyncio.create_subprocess_exec`.
-3. The Docker daemon receives 34 container creation requests. Docker serializes some lifecycle operations internally (container ID allocation, layer setup, cgroup creation within its own goroutine pool).
-4. Docker creates 34 sibling containers on the host daemon (not nested inside the server container), each with `--memory 8192m --cpus 2 --network none --pids-limit 1024`.
+3. The Docker daemon receives 16 container creation requests. Docker serializes some lifecycle operations internally (container ID allocation, layer setup, cgroup creation within its own goroutine pool).
+4. Docker creates 16 sibling containers on the host daemon (not nested inside the server container), each with `--memory 8192m --cpus 2 --network none --pids-limit 1024`.
 5. Each container runs `bash -c "<compile/run command>"` and exits.
 6. `--rm` triggers automatic cleanup (asynchronous within the daemon — if many containers exit simultaneously, cleanup can queue).
 7. For compiled languages, each request spawns **two sequential containers**: one for compilation, one for execution. This doubles the Docker lifecycle overhead compared to interpreted languages.
@@ -515,15 +516,15 @@ A `/submit` request fans out to N parallel sandbox executions:
     +-- check_stdio_test_case(case_N) --> run_code_in_sandbox() --> sandbox slot
 ```
 
-With `max_runner_concurrency=3` (local default): at most 3 test cases execute simultaneously per `/submit` request. With `max_concurrency=34`: at most 34 total sandbox slots exist globally. By default, the first test case failure cancels remaining tasks (set `config.extra.run_all_cases: true` to override).
+With `max_runner_concurrency=3` (local default): at most 3 test cases execute simultaneously per `/submit` request. With `max_concurrency=16`: at most 16 total sandbox slots exist globally. By default, the first test case failure cancels remaining tasks (set `config.extra.run_all_cases: true` to override).
 
-**Example scenario — 10 simultaneous `/submit` requests, each with 20 test cases, `max_runner_concurrency=3`, `max_concurrency=34`:**
+**Example scenario — 10 simultaneous `/submit` requests, each with 20 test cases, `max_runner_concurrency=3`, `max_concurrency=16`:**
 
 - Total test case tasks created: 10 x 20 = 200 asyncio tasks
 - Active test cases per request: 3 (semaphore-limited)
-- Total active test cases: min(10 x 3, 34) = **30** (global semaphore limits to 34)
-- Queued test cases: 200 - 30 = **170** awaiting semaphore
-- Wall time: ~(200 / 30) x per_execution_time ~ 7x the single execution time
+- Total active test cases: min(10 x 3, 16) = **16** (global semaphore limits to 16)
+- Queued test cases: 200 - 16 = **184** awaiting semaphore
+- Wall time: ~(200 / 16) x per_execution_time ~ 12.5x the single execution time
 
 ### Per-Request Latency Breakdown
 
@@ -541,17 +542,17 @@ With `max_runner_concurrency=3` (local default): at most 3 test cases execute si
 
 ### Throughput Comparison at Scale
 
-| Metric | Lite (34 concurrent) | Full (34 concurrent) |
+| Metric | Lite (16 concurrent) | Full (16 concurrent) |
 |--------|---------------------|---------------------|
 | Sustained throughput (simple Python) | ~90 req/s (10ms exec + ~100ms overhead) | ~60 req/s (10ms exec + 500ms overhead) |
-| Burst (34 concurrent) | ~100ms setup x 34 ~ 200ms wall | ~500ms setup x 34 ~ 800ms wall |
-| Memory at peak (worst case) | 34 x 8GB cgroup limit + overlayfs tmpfs | 34 x 8GB Docker limit |
+| Burst (16 concurrent) | ~100ms setup x 16 ~ 200ms wall | ~500ms setup x 16 ~ 800ms wall |
+| Memory at peak (worst case) | 16 x 8GB cgroup limit + overlayfs tmpfs | 16 x 8GB Docker limit |
 | Isolation teardown | ~50ms (unmount, cgroup kill, netns cleanup) | Docker daemon queues --rm cleanup |
 
 ### Bottleneck Analysis for High-Load Scenarios
 
-- **CPU:** Each sandboxed process gets 2 CPU cores by default. With 34 concurrent executions on an 8-core host, the CPU is heavily oversubscribed (68 cores worth of quota on 8 physical cores). For CPU-bound workloads (compilation, compute), reduce `max_concurrency` or `default_cpu_limit` to match available cores.
-- **Memory:** 34 concurrent x 8 GB = 272 GB theoretical max. In practice, most executions use far less; the cgroup limit is a ceiling, not a reservation. Size the host accordingly for worst-case.
+- **CPU:** Each sandboxed process gets 2 CPU cores by default. With 16 concurrent executions on an 8-core host, the CPU is heavily oversubscribed (32 cores worth of quota on 8 physical cores). For CPU-bound workloads (compilation, compute), reduce `max_concurrency` or `default_cpu_limit` to match available cores.
+- **Memory:** 16 concurrent x 8 GB = 128 GB theoretical max. In practice, most executions use far less; the cgroup limit is a ceiling, not a reservation. Size the host accordingly for worst-case.
 - **Disk I/O (lite mode):** Each overlayfs uses a tmpfs upper layer backed by RAM. High concurrent writes increase memory pressure. `/tmp` must have sufficient space.
 - **Docker daemon (full mode):** The daemon serializes some container lifecycle operations. Above ~50 concurrent containers, daemon latency becomes noticeable (~2-5s startup). Above ~100 concurrent containers, some `docker run` calls can take 10s+. Consider tuning Docker's `max-concurrent-downloads` and storage driver.
 - **stdin piping (full mode):** The `-i` flag keeps the container's stdin open. The server writes to the Docker subprocess's stdin pipe, which Docker forwards to the container process. This is an extra hop compared to lite mode (where stdin goes directly to the chrooted bash process) and can add latency under heavy I/O.
@@ -581,7 +582,7 @@ The recommended way to run SandboxFusion in production is via the pre-built serv
 ```bash
 docker run -d --rm --privileged \
     -p 8080:8080 \
-    ineil77/sandbox-fusion-server:25042026
+    ineil77/sandbox-fusion-server:25042026-2
 ```
 
 **Fully tuned launch:**
@@ -595,15 +596,15 @@ docker run -d --rm --privileged \
     --tmpfs /tmp:rw,nosuid,nodev,size=64g \
     -e PORT=8080 \
     -e SANDBOX_CONFIG=local \
-    ineil77/sandbox-fusion-server:25042026
+    ineil77/sandbox-fusion-server:25042026-2
 ```
 
 ### Resource Sizing Guidelines
 
 | Resource | Purpose | Recommendation |
 |----------|---------|----------------|
-| **CPU cores** | Each sandbox instance gets `default_cpu_limit` CPUs (default 2) via cgroup. The server itself needs 1-2 cores for the event loop and I/O. | `--cpus` = `max_concurrency × default_cpu_limit` + 2. For 34 concurrent sandboxes at 2 CPUs: **70 cores**. |
-| **RAM** | Each sandbox gets `default_memory_limit_mb` (default 8 GB) cgroup limit. overlayfs upper layers (lite mode) live in tmpfs backed by RAM. The server process itself uses ~500 MB. | `--memory` = `max_concurrency × default_memory_limit_mb + 4GB` overhead. For 34 concurrent at 8 GB: **276 GB** worst-case. In practice, most runs use <256 MB; **64-128 GB** is sufficient for typical workloads. |
+| **CPU cores** | Each sandbox instance gets `default_cpu_limit` CPUs (default 2) via cgroup. The server itself needs 1-2 cores for the event loop and I/O. | `--cpus` = `max_concurrency × default_cpu_limit` + 2. For 16 concurrent sandboxes at 2 CPUs: **34 cores**. |
+| **RAM** | Each sandbox gets `default_memory_limit_mb` (default 8 GB) cgroup limit. overlayfs upper layers (lite mode) live in tmpfs backed by RAM. The server process itself uses ~500 MB. | `--memory` = `max_concurrency × default_memory_limit_mb + 4GB` overhead. For 16 concurrent at 8 GB: **132 GB** worst-case. In practice, most runs use <256 MB; **64-128 GB** is sufficient for typical workloads. |
 | **Shared memory (`--shm-size`)** | Default Docker `/dev/shm` is 64 MB. Some language runtimes (JVM, .NET) use shared memory. Chromium (Puppeteer/Node tests) requires significant shm. | **4-16 GB** depending on workload. Start with `--shm-size 8g`. |
 | **`/tmp` space** | Lite mode creates overlayfs mounts and temporary source files under `/tmp`. Full mode uses `/tmp` for source code staging before bind-mounting. | Use `--tmpfs /tmp:size=32g` to ensure sufficient tmpfs space, or bind-mount a fast local SSD: `-v /fast-ssd/sandbox-tmp:/tmp`. |
 | **Disk** | The server image is ~15-20 GB (all language toolchains). Log output goes to stdout/stderr. | **40 GB** minimum for the image + operational headroom. |
@@ -617,7 +618,7 @@ docker run -d --rm --privileged \
     -p 8080:8080 \
     -v /path/to/production.yaml:/root/sandbox/sandbox/configs/production.yaml \
     -e SANDBOX_CONFIG=production \
-    ineil77/sandbox-fusion-server:25042026
+    ineil77/sandbox-fusion-server:25042026-2
 ```
 
 **Example `production.yaml` for a 64-core, 256 GB host:**
@@ -627,7 +628,7 @@ sandbox:
   max_concurrency: 30           # Leave cores for server + OS
   default_memory_limit_mb: 8192 # 8 GB per execution
   default_cpu_limit: 2          # 2 cores per execution
-  docker_image: ineil77/sandbox-fusion-server:25042026
+  docker_image: ineil77/sandbox-fusion-server:25042026-2
 
 eval:
   max_runner_concurrency: 10   # Parallel test cases per /submit request
@@ -645,9 +646,9 @@ docker run -d --rm --privileged \
     -p 8080:8080 \
     -v /var/run/docker.sock:/var/run/docker.sock \
     -v /tmp/sandbox-shared:/tmp/sandbox-shared \
-    -e SANDBOX_CONFIG=full_test \
+    -e SANDBOX_CONFIG=docker_full \
     -e SANDBOX_TMP_DIR=/tmp/sandbox-shared \
-    ineil77/sandbox-fusion-server:25042026
+    ineil77/sandbox-fusion-server:25042026-2
 ```
 
 **Critical:** The shared temp directory mount is required. The server creates temp directories under `SANDBOX_TMP_DIR` and bind-mounts them into sibling execution containers via `-v /tmp/sandbox-shared/xyz:/tmp/sandbox-shared/xyz`. Because execution containers are siblings (created on the host Docker daemon, not nested), the `-v` path resolves on the **host**, not inside the server container. Without sharing this directory, execution containers cannot access the source code files and all runs fail with "No such file or directory".
@@ -674,7 +675,7 @@ docker run ... --health-cmd "curl -f http://localhost:8080/v1/ping || exit 1" \
 
 The server logs structured JSON via `structlog` to stdout. In production, pipe to a log aggregator:
 ```bash
-docker run ... ineil77/sandbox-fusion-server:25042026 2>&1 | jq .
+docker run ... ineil77/sandbox-fusion-server:25042026-2 2>&1 | jq .
 ```
 
 ### Kubernetes Deployment Notes
@@ -711,9 +712,9 @@ Server listens on `http://0.0.0.0:8080` with endpoints:
 ### 2. Running via Docker (Production)
 
 ```bash
-make build-base-image                # builds ineil77/sandbox-fusion-base:25042026
-make build-server-image              # builds ineil77/sandbox-fusion-server:25042026
-docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:25042026
+make build-base-image                # builds ineil77/sandbox-fusion-base:25042026-2
+make build-server-image              # builds ineil77/sandbox-fusion-server:25042026-2
+docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:25042026-2
 ```
 
 ### 3. Using the Python Client SDK
@@ -783,7 +784,7 @@ asyncio.run(main())
 from concurrent.futures import ThreadPoolExecutor
 from sandbox_fusion import client
 
-with ThreadPoolExecutor(max_workers=34) as pool:
+with ThreadPoolExecutor(max_workers=16) as pool:
     futures = [pool.submit(client.run_code, req) for req in requests]
     results = [f.result() for f in futures]
 ```
@@ -828,17 +829,17 @@ curl -X POST http://localhost:8080/submit \
 ### 7. Running Tests
 
 ```bash
-make test                        # All tests with 64 parallel workers (TEST_NP=64)
-make test TEST_NP=8              # Override parallelism (recommended for full mode -- Docker daemon saturates above ~8 concurrent containers)
-make test-case CASE=test_python  # Single test with stdout
-make test-minor                  # Minor language tests only
+make test                        # All tests in full mode with 16 parallel workers
+make test-docker-full            # Full (Docker-in-Docker) isolation mode
+make test-docker-lite            # Lite isolation mode
+make test-case CASE=test_python MODE=full  # Single test with stdout visible
 ```
 
 ### 8. Configuration Override
 
 ```bash
-SANDBOX_CONFIG=ci make run-online    # Use ci.yaml
-SANDBOX_CONFIG=local make run        # Use local.yaml (default)
+SANDBOX_CONFIG=docker_full make run-online  # Use docker_full.yaml
+SANDBOX_CONFIG=local make run              # Use local.yaml (default)
 ```
 
 ---
@@ -848,8 +849,8 @@ SANDBOX_CONFIG=local make run        # Use local.yaml (default)
 | Scenario | Recommended Mode | Recommended Client | Config Tuning |
 |----------|-----------------|-------------------|---------------|
 | RL training (batch eval, 1000s of requests) | Lite | Async | `max_concurrency` = cores - 2, `max_runner_concurrency` = 10+ |
-| CI / automated testing | Lite | Sync (pytest) | `max_concurrency` = 0 (let xdist manage) |
+| CI / automated testing | Lite | Sync (pytest) | `max_concurrency` = 16 |
 | Multi-tenant production | Full | Async | `max_concurrency` = 20-30, monitor Docker daemon |
 | Low-throughput API service | Either | Either | Defaults are fine |
 | Maximum isolation | Full | Either | Consider Kata containers or gVisor for defense-in-depth |
-| Cross-platform development | Full | Sync | Default `full_test.yaml` config |
+| Cross-platform development | Full | Sync | Default `docker_full.yaml` config |

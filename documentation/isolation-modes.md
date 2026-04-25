@@ -41,7 +41,7 @@ When a code execution request arrives, the sandbox:
 ```yaml
 sandbox:
   isolation: lite
-  max_concurrency: 34
+  max_concurrency: 16
 ```
 
 ### Implementation
@@ -64,7 +64,7 @@ Full isolation runs each code execution inside a disposable Docker container. Th
 
 When a code execution request arrives, the sandbox:
 
-1. **Launches a Docker container** from the configured `docker_image` (default: `ineil77/sandbox-fusion-server:25042026`) with these flags:
+1. **Launches a Docker container** from the configured `docker_image` (default: `ineil77/sandbox-fusion-server:25042026-2`) with these flags:
    - `--rm` -- Container is automatically removed after exit.
    - `--name sandbox_<random_hex>` -- Unique container name for reliable force-removal on cleanup.
    - `--memory` -- Memory limit from the request or `sandbox.default_memory_limit_mb` (default 8192 MB).
@@ -80,7 +80,7 @@ When a code execution request arrives, the sandbox:
 ### Requirements
 
 - **Docker daemon**: Must be installed and running on the host.
-- **`ineil77/sandbox-fusion-server:25042026` image**: The Docker image must have all language runtimes pre-installed. Build it with `make build-server-image`.
+- **`ineil77/sandbox-fusion-server:25042026-2` image**: The Docker image must have all language runtimes pre-installed. Build it with `make build-server-image`.
 - **No nested Docker**: Full isolation does NOT use Docker-in-Docker. The host Docker daemon creates sibling containers (Docker-out-of-Docker).
 - **Shared temp directory**: When the server runs inside Docker, mount a shared temp directory (e.g., `-v /tmp/sandbox-shared:/tmp/sandbox-shared`) and set `-e SANDBOX_TMP_DIR=/tmp/sandbox-shared` so that sibling execution containers can access the temp directories created by the server. The bind mount source is resolved on the Docker **host**, so the path must exist on the host and be shared between the server container and execution containers. Without this, all executions fail with "No such file or directory".
 - **Docker socket**: The server container needs `-v /var/run/docker.sock:/var/run/docker.sock` to communicate with the host Docker daemon.
@@ -91,12 +91,12 @@ When a code execution request arrives, the sandbox:
 sandbox:
   isolation: full
   max_concurrency: 100
-  docker_image: ineil77/sandbox-fusion-server:25042026
+  docker_image: ineil77/sandbox-fusion-server:25042026-2
   default_memory_limit_mb: 8192
   default_cpu_limit: 2
 ```
 
-The `docker_image` field specifies which image to use for execution containers. It defaults to `ineil77/sandbox-fusion-server:25042026`, which is built by `make build-server-image` and includes all 20+ language runtimes.
+The `docker_image` field specifies which image to use for execution containers. It defaults to `ineil77/sandbox-fusion-server:25042026-2`, which is built by `make build-server-image` and includes all 20+ language runtimes.
 
 **Launching for full mode (Docker-out-of-Docker):**
 
@@ -107,7 +107,7 @@ docker run -d --rm --privileged \
     -v /tmp/sandbox-shared:/tmp/sandbox-shared \
     -e SANDBOX_CONFIG=full_test \
     -e SANDBOX_TMP_DIR=/tmp/sandbox-shared \
-    ineil77/sandbox-fusion-server:25042026
+    ineil77/sandbox-fusion-server:25042026-2
 ```
 
 ---
@@ -125,7 +125,7 @@ docker run -d --rm --privileged \
 ### Typical deployment patterns
 
 **Docker deployment (recommended):**
-- Build `ineil77/sandbox-fusion-server:25042026` which runs the SandboxFusion server inside a Docker container.
+- Build `ineil77/sandbox-fusion-server:25042026-2` which runs the SandboxFusion server inside a Docker container.
 - The server uses **lite** isolation inside the container (overlayfs + cgroups within the privileged container).
 - The container needs `--privileged` for overlayfs/cgroups.
 - No nested Docker involved.
@@ -137,7 +137,7 @@ docker run -d --rm --privileged \
 
 **Full isolation deployment:**
 - The SandboxFusion server runs on the host (or in a container with Docker socket access and a shared temp directory via `-v /tmp/sandbox-shared:/tmp/sandbox-shared -e SANDBOX_TMP_DIR=/tmp/sandbox-shared`).
-- Each code execution spawns a separate `ineil77/sandbox-fusion-server:25042026` container via the host Docker daemon.
+- Each code execution spawns a separate `ineil77/sandbox-fusion-server:25042026-2` container via the host Docker daemon.
 - Use when you want maximum isolation and can tolerate higher latency.
 
 ### Behavioral differences between modes

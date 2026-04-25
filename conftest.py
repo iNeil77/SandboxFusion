@@ -70,7 +70,7 @@ def _start_docker_server(mode: str):
     import secrets
     _container_name = f'sandbox_test_{secrets.token_hex(4)}'
 
-    image = 'ineil77/sandbox-fusion-server:25042026'
+    image = 'ineil77/sandbox-fusion-server:25042026-2'
     port = int(os.environ.get('SANDBOX_TEST_PORT', '18080'))
 
     if mode == 'full':
