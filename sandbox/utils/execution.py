@@ -12,17 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Process management and concurrency utilities for sandbox execution.
+"""Process management utilities for sandbox execution.
 
 Provides helpers for safe byte decoding, non-blocking async stream reading,
 process tree termination, temporary directory management, cgroup memory node
-discovery, async concurrency limiting, and child process identification.
+discovery, and child process identification.
 """
 
 import asyncio
 import os
-from functools import cache, wraps
-from typing import Any, Callable, Coroutine, TypeVar
+from functools import cache
 
 import psutil
 import structlog
@@ -133,36 +132,6 @@ def get_memory_nodes() -> str:
     with open('/sys/fs/cgroup/cpuset/cpuset.mems') as f:
         return f.read().strip()
 
-
-T = TypeVar('T', bound=Callable[..., Coroutine[Any, Any, Any]])
-
-
-def max_concurrency(limit: int) -> Callable[[T], T]:
-    """Decorator that limits the maximum number of concurrent executions of an async function.
-
-    Creates an ``asyncio.Semaphore`` with the given limit and wraps the
-    decorated async function so that at most ``limit`` invocations can run
-    concurrently. Additional callers will await until a semaphore slot is
-    available.
-
-    Args:
-        limit: The maximum number of concurrent executions allowed.
-
-    Returns:
-        A decorator that wraps an async function with concurrency limiting.
-    """
-    semaphore = asyncio.Semaphore(limit)
-
-    def decorator(func: T) -> T:
-
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            async with semaphore:
-                return await func(*args, **kwargs)
-
-        return wrapper
-
-    return decorator
 
 
 def find_child_with_least_pid(ppid) -> int | None:

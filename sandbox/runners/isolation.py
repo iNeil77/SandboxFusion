@@ -172,7 +172,7 @@ def cleanup_orphaned_sandboxes() -> int:
                                  capture_output=True, text=True, timeout=5)
         for line in result.stdout.splitlines():
             ns_name = line.split()[0] if line.strip() else ''
-            if len(ns_name) == 16 and ns_name.isalpha() and ns_name.islower():
+            if ns_name.startswith('sbox_'):
                 _subprocess.run(['sudo', 'ip', 'netns', 'delete', ns_name],
                                 stdout=_subprocess.DEVNULL, stderr=_subprocess.DEVNULL, timeout=5)
                 logger.info('cleaned orphaned netns', name=ns_name)
@@ -620,14 +620,9 @@ def _get_subnet_event() -> asyncio.Event:
     return _subnet_available_event
 
 
-pytest_worker_id = os.environ.get("PYTEST_XDIST_WORKER")
-if pytest_worker_id is not None:
+for i in range(16, 32):
     for j in range(0, 256):
-        _available_subnets.append(f"172.{16 + int(pytest_worker_id[2:])}.{j}")
-else:
-    for i in range(16, 32):
-        for j in range(0, 256):
-            _available_subnets.append(f"172.{i}.{j}")
+        _available_subnets.append(f"172.{i}.{j}")
 create_netns_script = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../scripts/create_net_namespace.sh'))
 clean_netns_script = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../scripts/clean_net_namespace.sh'))
 
@@ -681,7 +676,7 @@ async def tmp_netns(no_bridge: bool = False):
     Yields:
         The name of the newly created network namespace.
     """
-    net_ns_name = random_cgroup_name()
+    net_ns_name = f'sbox_{random_cgroup_name()}'
     evt = _get_subnet_event()
     deadline = time.monotonic() + _SUBNET_ACQUIRE_TIMEOUT
     while True:
@@ -712,12 +707,10 @@ async def tmp_netns(no_bridge: bool = False):
 
 
 # ---------------------------------------------------------------------------
-# Module startup: install signal handlers and sweep orphans from prior crashes.
+# Module startup: install signal handlers for graceful overlay cleanup.
+# Orphan sweep is handled by the server startup event (server.py).
 # ---------------------------------------------------------------------------
 _install_cleanup_handlers()
-_orphans_cleaned = cleanup_orphaned_sandboxes()
-if _orphans_cleaned:
-    logger.warning('startup sweep cleaned orphaned sandboxes', count=_orphans_cleaned)
 
 
 async def main():

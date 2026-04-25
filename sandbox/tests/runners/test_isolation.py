@@ -218,9 +218,6 @@ async def test_isolation_network_server_port_conflict():
 @pytest.mark.skipif(
     os.environ.get('SANDBOX_ISOLATION_MODE') == 'full',
     reason='Full mode uses --network none which blocks all egress traffic')
-@pytest.mark.skipif(
-    os.environ.get('PYTEST_XDIST_WORKER') is not None,
-    reason='External network access is unreliable under parallel xdist workers due to NAT bridge contention')
 def test_isolation_network_external_access():
     """Verify that sandboxed code can make outbound HTTP requests to external hosts.
 

@@ -62,11 +62,15 @@ def _shell_quote(s: str) -> str:
 
 
 def _close_subprocess_pipes(p):
-    """Close all pipe transports on an asyncio subprocess to release file descriptors."""
-    for fd in (0, 1, 2):
-        transport = p._transport.get_pipe_transport(fd)
-        if transport is not None and not transport.is_closing():
-            transport.close()
+    """Close all pipe handles on an asyncio subprocess to release file descriptors."""
+    for pipe in (p.stdin, p.stdout, p.stderr):
+        if pipe is None:
+            continue
+        try:
+            if hasattr(pipe, 'close'):
+                pipe.close()
+        except Exception:
+            pass
 
 
 async def run_command_bare(command: str | List[str],
@@ -346,10 +350,13 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
                 await asyncio.gather(*[_rm_container(n) for n in container_names])
             # Docker containers create files as root inside bind-mounted cwd.
             # Fix ownership so the caller's TemporaryDirectory cleanup succeeds.
+            import secrets as _sec
+            chown_name = f'sandbox_chown_{_sec.token_hex(8)}'
             fix = None
             try:
                 fix = await asyncio.create_subprocess_exec(
                     'docker', 'run', '--rm',
+                    '--name', chown_name,
                     '-v', f'{cwd}:{cwd}',
                     docker_image,
                     'chown', '-R', f'{os.getuid()}:{os.getgid()}', cwd,
@@ -360,6 +367,7 @@ async def run_commands(compile_command: Optional[str], run_command: str, cwd: st
             except asyncio.TimeoutError:
                 if fix is not None:
                     fix.kill()
+                await _rm_container(chown_name)
                 logger.warning('docker chown timed out', cwd=cwd)
             except Exception:
                 pass

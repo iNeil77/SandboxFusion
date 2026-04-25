@@ -73,12 +73,21 @@ def _start_docker_server(mode: str):
     image = 'ineil77/sandbox-fusion-server:25042026'
     port = int(os.environ.get('SANDBOX_TEST_PORT', '18080'))
 
+    if mode == 'full':
+        container_memory = '16g'
+        container_cpus = '8'
+    elif mode == 'lite':
+        container_memory = '256g'
+        container_cpus = '128'
+    else:
+        raise ValueError(f'--sandbox-docker must be "lite" or "full", got {mode!r}')
+
     cmd = [
         'docker', 'run', '-d',
         '--name', _container_name,
         '-p', f'{port}:8080',
-        '--memory', '16g',
-        '--cpus', '8',
+        '--memory', container_memory,
+        '--cpus', container_cpus,
         '--pids-limit', '4096',
     ]
 
@@ -96,9 +105,6 @@ def _start_docker_server(mode: str):
             '--privileged',
             '-e', 'SANDBOX_CONFIG=docker_lite',
         ]
-    else:
-        raise ValueError(f'--sandbox-docker must be "lite" or "full", got {mode!r}')
-
     cmd.append(image)
 
     print(f'\n--- Starting sandbox server container ({mode} mode): {_container_name} ---')

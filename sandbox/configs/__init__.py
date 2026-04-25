@@ -15,7 +15,7 @@
 
 Available configuration profiles are selected via the ``SANDBOX_CONFIG``
 environment variable (default ``"local"``).  Each profile corresponds to a
-YAML file in this directory (e.g. ``local.yaml``, ``ci.yaml``).
+YAML file in this directory (e.g. ``local.yaml``, ``docker_full.yaml``).
 """
 
 from sandbox.configs.run_config import RunConfig

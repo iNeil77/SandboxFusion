@@ -34,8 +34,9 @@ NAMESPACE=$1
 SUBNET=$2
 CREATE_BRIDGE=true
 # Linux interface names are limited to 15 characters.
-# Use first 6 chars of the namespace name as the veth suffix.
-VETH_ID=${NAMESPACE:0:6}
+# Use last 6 chars of the namespace name as the veth suffix to maximise
+# randomness (the namespace name may carry a fixed prefix like "sbox_").
+VETH_ID=${NAMESPACE: -6}
 VETH_NS="ve-${VETH_ID}"
 VETH_BR="ve-${VETH_ID}-br"
 

@@ -56,9 +56,9 @@ Supported languages:
 Build and run with all runtimes pre-installed:
 
 ```bash
-make build-base-image       # builds ineil77/sandbox-fusion-base:24042026-4 (all language runtimes)
-make build-server-image     # builds ineil77/sandbox-fusion-server:24042026-4 (app + deps)
-docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:24042026-4
+make build-base-image       # builds ineil77/sandbox-fusion-base:25042026 (all language runtimes)
+make build-server-image     # builds ineil77/sandbox-fusion-server:25042026 (app + deps)
+docker run -d --rm --privileged -p 8080:8080 ineil77/sandbox-fusion-server:25042026
 ```
 
 ### Manual (Linux only, for lite isolation)
